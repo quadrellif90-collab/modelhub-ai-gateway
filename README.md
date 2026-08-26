@@ -76,7 +76,18 @@ prefs.json         Preferenze runtime (profili, strategie, feature)
 
 - Le API key sono cifrate su disco (AES-256-GCM) e non lasciano mai la tua macchina: tutto il traffico passa dal processo locale verso i provider.
 - Il server ascolta solo su `127.0.0.1`.
-- Imposta `CONTROL_TOKEN` per proteggere le API di controllo `/hub/*` se condividi la macchina.
+- Dalla v0.5.0 le API di controllo `/hub/*` richiedono un token (`MODELHUB_TOKEN` env oppure `controlToken` in prefs) e le richieste chat richiedono una API key del gateway (configurabile nel pannello web). Il widget e il pannello web ricevono il token automaticamente.
+
+## English summary
+
+**ModelHub** is a local AI gateway and tray app: one OpenAI-compatible endpoint (`http://127.0.0.1:8787/v1`) that routes your requests across 30+ providers and 1000+ models with automatic failover, health probing, response caching, usage/cost tracking, and a built-in prompt enhancer. Profiles (`auto`, `auto-code`, `auto-reasoning`, `auto-fast`, `free-pool`) are auto-ranked by reliability and latency, preferring free models that actually work.
+
+```bash
+npm install
+npm start        # tray icon + web panel at http://127.0.0.1:8787
+```
+
+Point any OpenAI client at `http://127.0.0.1:8787/v1` (model: `auto`). Control API under `/hub/*` is token-protected; set `MODELHUB_TOKEN` to lock it down. Downloads on the [releases page](../../releases).
 
 ## Licenza
 

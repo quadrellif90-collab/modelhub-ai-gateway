@@ -1,4 +1,5 @@
 const BASE = "http://127.0.0.1:8787";
+const TOKEN = new URLSearchParams(location.search).get("t") || "";
 const DEFAULT_PROFILES = ["auto", "auto-code", "auto-reasoning", "auto-fast", "free-pool"];
 const STRATEGIES = [
   ["autoroute", "autoroute (automatico)"],
@@ -19,7 +20,7 @@ const UI = Object.assign(
 function saveUI() { try { localStorage.setItem("mh-ui", JSON.stringify(UI)); } catch {} }
 
 async function api(path, method = "GET", body) {
-  const opt = { method, headers: { "Content-Type": "application/json" } };
+  const opt = { method, headers: { "Content-Type": "application/json", "x-modelhub-token": TOKEN } };
   if (body) opt.body = JSON.stringify(body);
   const r = await fetch(BASE + path, opt);
   try { return await r.json(); } catch { return {}; }
@@ -429,7 +430,7 @@ document.getElementById("featProbe").onchange = async (e) => {
   poll();
 };
 document.getElementById("exportBtn").onclick = async () => {
-  const r = await fetch(BASE + "/hub/export");
+  const r = await fetch(BASE + "/hub/export", { headers: { "x-modelhub-token": TOKEN } });
   const blob = await r.blob();
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);

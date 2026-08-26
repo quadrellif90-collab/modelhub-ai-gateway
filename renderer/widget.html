@@ -58,8 +58,9 @@
   <footer id="enh">enhancer: –</footer>
   <script>
     const BASE = "http://127.0.0.1:8787";
+    const TOKEN = new URLSearchParams(location.search).get("t") || "";
     async function api(p) {
-      const r = await fetch(BASE + p);
+      const r = await fetch(BASE + p, { headers: { "x-modelhub-token": TOKEN } });
       try { return await r.json(); } catch { return null; }
     }
     function fmtCost(c) {

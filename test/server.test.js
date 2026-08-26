@@ -286,3 +286,16 @@ describe("postWithFailover", () => {
     } finally { srv.close(); }
   });
 });
+
+describe("openai streaming e2e", () => {
+  test("streams SSE chunks and closes the connection", async () => {
+    const { execFile } = require("node:child_process");
+    const path = require("node:path");
+    await new Promise((resolve, reject) => {
+      execFile(process.execPath, [path.join(__dirname, "helpers", "stream-e2e.js")], { timeout: 30000 }, (err, stdout) => {
+        if (err) return reject(new Error(String(stdout || err.message)));
+        resolve();
+      });
+    });
+  });
+});

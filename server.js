@@ -1,4 +1,4 @@
-﻿const http = require("node:http");
+const http = require("node:http");
 const https = require("node:https");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -16,7 +16,6 @@ const DEFAULT_PROFILES = ["auto", "auto-code", "auto-reasoning", "auto-fast", "f
 const AUTO_PROBE = process.env.MODELHUB_AUTO_PROBE !== "0";
 const ENV_PLAIN = process.env.MODELHUB_AUTH_PLAIN === "1" || process.env.MODELHUB_AUTH_PLAIN === "true";
 const AUTH_KEY_ENV = process.env.MODELHUB_AUTH_KEY;
-const CONTROL_TOKEN = process.env.MODELHUB_TOKEN || "";
 const REQUEST_LOG_FILE = path.join(DIR, "requests.log.jsonl");
 const PRICING_FILE = path.join(DIR, "pricing.json");
 const CACHE_ENABLED = process.env.MODELHUB_CACHE !== "0";
@@ -56,7 +55,7 @@ const SIGNUP_URLS = {
   xai: "https://console.x.ai",
   zai: "https://z.ai/manage-apikey/apikey-list"
 };
-const VERSION = "0.4.0";
+const VERSION = "0.5.0";
 let cacheOn = process.env.MODELHUB_CACHE !== "0";
 let autoProbeOn = AUTO_PROBE;
 const UA_HTTP = new http.Agent({ keepAlive: true, maxSockets: 64 });
@@ -76,6 +75,15 @@ function releaseSlot(provider) {
   const next = s.queue.shift();
   if (next) next();
   else s.active = Math.max(0, s.active - 1);
+}
+
+const STREAM_CAP_PER_PROVIDER = Math.max(4, PROV_CONCURRENCY * 2);
+const streamSlots = new Map();
+function streamSlotFree(provider) { return (streamSlots.get(provider) || 0) < STREAM_CAP_PER_PROVIDER; }
+function streamSlotTake(provider) { streamSlots.set(provider, (streamSlots.get(provider) || 0) + 1); }
+function streamSlotGive(provider) {
+  const n = (streamSlots.get(provider) || 1) - 1;
+  if (n <= 0) streamSlots.delete(provider); else streamSlots.set(provider, n);
 }
 
 // ---------------------------------------------------------------------------
@@ -339,20 +347,6 @@ function buildFreePool() {
     .sort((a, b) => autorouteScore(b) - autorouteScore(a));
 }
 
-function providerDaily() {
-  const map = {};
-  for (const m of models) {
-    if (!m.enabled || !m.free) continue;
-    if (!map[m.provider]) map[m.provider] = { req: 0, tok: 0 };
-    map[m.provider].req += m.dailyReq;
-    map[m.provider].tok += m.dailyTok;
-  }
-  return map;
-}
-
-// ---------------------------------------------------------------------------
-// health / usage
-// ---------------------------------------------------------------------------
 function markFail(m, err, retryAfterMs) {
   m.lifetimeFails = (m.lifetimeFails || 0) + 1;
   m.lastFailAt = Date.now();
@@ -743,6 +737,10 @@ function streamWithFailover(openaiBody, res, protocol) {
         let u;
         try { u = new URL(m.baseURL); } catch { markFail(m, "bad url"); continue; }
         const transport = u.protocol === "https:" ? https : http;
+        if (!streamSlotFree(m.provider)) continue;
+        streamSlotTake(m.provider);
+        let srel = false;
+        const giveOnce = () => { if (!srel) { srel = true; streamSlotGive(m.provider); } };
         const req = transport.request({
           agent: upstreamAgent(u),
           method: "POST",
@@ -758,6 +756,7 @@ function streamWithFailover(openaiBody, res, protocol) {
             let b = "";
             upRes.on("data", d => b += d);
             upRes.on("end", () => {
+              giveOnce();
               const ra = parseRetryAfter(upRes, b);
               const code = upRes.statusCode;
               if (code === 429) markFail(m, `HTTP 429`, ra || null);
@@ -785,6 +784,7 @@ function streamWithFailover(openaiBody, res, protocol) {
           function done() {
             if (finished) return;
             finished = true;
+            giveOnce();
             xlat.onDone(res);
             recordRequest({
               proto: "stream:" + protocol, reqModel: openaiBody.model, model: id, ok: true, error: "",
@@ -826,14 +826,17 @@ function streamWithFailover(openaiBody, res, protocol) {
           });
           pt.on("end", () => { if (!finished) done(); });
           pt.on("error", () => { if (!finished) done(); });
+          pt.on("close", () => giveOnce());
           return;
         });
         req.on("error", (e) => {
+          giveOnce();
           markFail(m, e.message || "error", null);
           recordRequest({ proto: "stream:" + protocol, reqModel: openaiBody.model, model: id, ok: false, error: String(e.message || e).slice(0, 120), latencyMs: Date.now() - t0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
           attempt();
         });
         req.setTimeout(UPSTREAM_TIMEOUT_MS, () => {
+          giveOnce();
           req.destroy(new Error("timeout"));
           markFail(m, "timeout", null);
           recordRequest({ proto: "stream:" + protocol, reqModel: openaiBody.model, model: id, ok: false, error: "timeout", latencyMs: Date.now() - t0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
@@ -930,12 +933,15 @@ function openAIToOllama(data, model) {
 // auth
 // ---------------------------------------------------------------------------
 function controlAuthorized(req) {
-  if (!CONTROL_TOKEN) return true;
+  const token = process.env.MODELHUB_TOKEN || prefs.controlToken || "";
+  if (!token) return true;
   const h = req.headers["x-modelhub-token"] || "";
   const auth = typeof req.headers["authorization"] === "string"
     ? req.headers["authorization"].replace(/^Bearer\s+/i, "")
     : "";
-  return h === CONTROL_TOKEN || auth === CONTROL_TOKEN;
+  let q = "";
+  try { q = new URL(req.url, "http://localhost").searchParams.get("token") || ""; } catch {}
+  return h === token || auth === token || q === token;
 }
 function gatewayAuthorized(req) {
   if (!prefs.gatewayKeys || !prefs.gatewayKeys.length) return true;
@@ -1433,9 +1439,15 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: "no candidates" }));
           return;
         }
+        const peekId = candidates[0];
+        const peekM = peekId ? modelMap.get(peekId) : null;
+        if (peekM && !streamSlotFree(peekM.provider)) { setTimeout(attempt, 250); return; }
         const id = candidates.shift();
         const m = modelMap.get(id);
         if (!m || !m.enabled) { attempt(); return; }
+        streamSlotTake(m.provider);
+        let srel = false;
+        const giveOnce = () => { if (!srel) { srel = true; streamSlotGive(m.provider); } };
         const reqBody = JSON.stringify({ ...parsed, model: m.name, stream: true });
         const t0 = Date.now();
         let clientStarted = false;
@@ -1453,6 +1465,7 @@ const server = http.createServer(async (req, res) => {
             let b = "";
             upRes.on("data", d => b += d);
             upRes.on("end", () => {
+              giveOnce();
               const ra = parseRetryAfter(upRes, b);
               const code = upRes.statusCode;
               if (code === 429) markFail(m, `HTTP 429`, ra || null);
@@ -1486,6 +1499,7 @@ const server = http.createServer(async (req, res) => {
             res.write(c);
           });
           pt.on("end", () => {
+            giveOnce();
             if (!clientStarted) {
               markFail(m, "empty stream", null);
               recordRequest({ proto: "stream:openai", reqModel: parsed.model, model: id, ok: false, error: "empty stream", latencyMs: Date.now() - t0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
@@ -1499,15 +1513,18 @@ const server = http.createServer(async (req, res) => {
             });
             res.end();
           });
+          pt.on("close", () => giveOnce());
           return;
         });
         req.on("error", (e) => {
+          giveOnce();
           if (clientStarted) { try { res.end(); } catch {} return; }
           markFail(m, e.message, null);
           recordRequest({ proto: "stream:openai", reqModel: parsed.model, model: id, ok: false, error: String(e.message || e).slice(0, 120), latencyMs: Date.now() - t0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
           attempt();
         });
         req.setTimeout(UPSTREAM_TIMEOUT_MS, () => {
+          giveOnce();
           req.destroy(new Error("timeout"));
           if (clientStarted) { try { res.end(); } catch {} }
           else {

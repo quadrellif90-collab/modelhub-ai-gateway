@@ -3,6 +3,19 @@
 Tutte le modifiche rilevanti a ModelHub sono documentate qui.
 Il formato segue [Keep a Changelog](https://keepachangelog.com/) e il versioning segue [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-08-26
+
+### Added
+- Protezione dell'API di controllo: `/hub/*` ora richiede un token (env `MODELHUB_TOKEN` o `prefs.controlToken`), accettato via header `x-modelhub-token`, `Authorization: Bearer` o query param `?token=`.
+- API key del gateway: le richieste chat devono presentare una chiave valida (configurabile nel pannello web); `/v1/models`, `/metrics` e gli endpoint di compatibilità Ollama restano aperti.
+- Limite di concorrenza per provider anche sulle rotte streaming (`MODELHUB_PROVIDER_CONCURRENCY * 2`): nessun provider può ricevere stream illimitati.
+- Test E2E di regressione sullo streaming OpenAI (server mock SSE + avvio reale dell'hub su porta dedicata).
+- Aggiornamenti automatici con `electron-updater` (download automatico, installazione alla chiusura, check ogni 6 ore).
+- Avvio automatico con Windows attivo di default (disattivabile dal menu tray).
+
+### Removed
+- Codice morto: funzione `providerDaily()` e costante `CONTROL_TOKEN` inutilizzate.
+
 ## [0.4.0] - 2026-08-26
 
 ### Added

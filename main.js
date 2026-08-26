@@ -16,6 +16,11 @@ if (app.isPackaged) {
   );
   if (fs.existsSync(installDir)) process.env.MODELHUB_DIR = installDir;
 }
+const PREFS_PATH = path.join(process.env.MODELHUB_DIR || DIR, "prefs.json");
+let CTRL_TOKEN = process.env.MODELHUB_TOKEN || "";
+if (!CTRL_TOKEN) {
+  try { CTRL_TOKEN = JSON.parse(fs.readFileSync(PREFS_PATH, "utf8")).controlToken || ""; } catch {}
+}
 
 // ensure a tray icon exists
 if (!fs.existsSync(ICON)) {
@@ -43,7 +48,7 @@ function createWidget() {
     icon: ICON,
     webPreferences: { nodeIntegration: false, contextIsolation: true }
   });
-  widget.loadFile(path.join(DIR, "renderer", "widget.html"));
+  widget.loadFile(path.join(DIR, "renderer", "widget.html"), CTRL_TOKEN ? { query: { t: CTRL_TOKEN } } : undefined);
   widget.on("closed", () => { widget = null; });
 }
 
@@ -77,13 +82,24 @@ function setAutoStart(on) {
   app.setLoginItemSettings({ openAtLogin: on, path: process.execPath, args: [app.getAppPath()] });
 }
 
+function setupAutoUpdate() {
+  if (!app.isPackaged) return;
+  try {
+    const { autoUpdater } = require("electron-updater");
+    autoUpdater.autoDownload = true;
+    autoUpdater.autoInstallOnAppQuit = true;
+    autoUpdater.checkForUpdates().catch(() => {});
+    setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 6 * 60 * 60 * 1000);
+  } catch {}
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1180, height: 760, show: false,
     icon: ICON,
     webPreferences: { nodeIntegration: false, contextIsolation: true }
   });
-  win.loadFile(path.join(DIR, "renderer", "index.html"));
+  win.loadFile(path.join(DIR, "renderer", "index.html"), CTRL_TOKEN ? { query: { t: CTRL_TOKEN } } : undefined);
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) shell.openExternal(url);
     return { action: "deny" };
@@ -117,10 +133,12 @@ if (!gotLock) { app.quit(); }
 app.on("second-instance", () => showWindow());
 
 app.whenReady().then(() => {
+  try { if (!app.getLoginItemSettings().openAtLogin) setAutoStart(true); } catch {}
   startServer();
   createWindow();
   createTray();
   createWidget();
+  setupAutoUpdate();
   const launchedAtLogin = app.getLoginItemSettings().wasOpenedAtLogin;
   if (!launchedAtLogin) setTimeout(showWindow, 600);
 });
