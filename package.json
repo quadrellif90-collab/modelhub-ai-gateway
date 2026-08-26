@@ -1,5 +1,5 @@
 {
-  "name": "modelhub",
+  "name": "modelhub-ai-gateway",
   "version": "0.7.0",
   "private": true,
   "main": "main.js",
@@ -36,10 +36,16 @@
       "target": [
         "AppImage",
         "deb"
-      ]
+      ],
+      "maintainer": "quadrellif90-collab <noreply@github.com>",
+      "desktopName": "ModelHub"
     }
   },
   "dependencies": {
     "electron-updater": "^6.8.9"
+  },
+  "author": {
+    "name": "quadrellif90-collab",
+    "email": "noreply@github.com"
   }
 }
