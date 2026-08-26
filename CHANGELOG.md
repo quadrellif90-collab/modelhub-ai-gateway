@@ -3,6 +3,24 @@
 Tutte le modifiche rilevanti a ModelHub sono documentate qui.
 Il formato segue [Keep a Changelog](https://keepachangelog.com/) e il versioning segue [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] - 2026-08-26
+
+### Added
+- Pannello "Impostazioni" nel web panel: verifica periodica (intervallo e top-K), budget failover, TTL cache configurabili a runtime e persistiti (`POST /hub/settings`); le variabili d'ambiente restano prioritarie.
+- Rigenerazione del token di controllo dal pannello (bottone dedicato, mostrato una sola volta).
+- Limiti max caratteri e timeout del Prompt Enhancer configurabili dalla UI.
+- Pulsante "Widget" nella topbar per aprire/chiudere il widget realtime (prima solo click sulla tray).
+- Verifica reale periodica dei modelli: ping effettivi alle teste dei profili con flag `verified`/`lastVerifiedAt` esposti in `/hub/state` e badge ✓/✗/– nella UI.
+- Refresh automatico dei profili preconfigurati ogni 15 minuti: le liste si aggiornano da sole ai modelli attivi e sani.
+
+### Changed
+- Avvio molto più rapido (~5s): la verifica iniziale tocca solo le teste dei profili invece di tutti i modelli; probe completo disponibile via `POST /hub/probe`.
+- Badge di stato modello basato su `healthy` (cooldown scaduto = ok), errore solo come dettaglio.
+- Toolbar provider compattata su una riga singola.
+
+### Fixed
+- Congestione da probe: timeout ping allineato agli upstream lenti-ma-vivi e budget di failover globale (`MODELHUB_FAILOVER_MS`, default 45s) che garantisce sempre una risposta entro limite anche attraversando candidati non sani.
+
 ## [0.5.0] - 2026-08-26
 
 ### Added

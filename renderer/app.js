@@ -60,6 +60,7 @@ function render(s) {
   renderGatewayKeys(s);
   renderEnhancer(s);
   renderFeatures(s);
+  renderSettings(s);
   renderLeaderboard(s);
   const ci = document.getElementById("cacheInfo");
   ci.textContent = s.cache.enabled
@@ -152,9 +153,14 @@ function renderProviders(s) {
     for (const m of models) {
       const row = document.createElement("div");
       row.className = "model";
-      const stat = m.lastError
-        ? `<span class="down" title="${esc(m.lastError)}">down</span>`
+      const stat = m.healthy === false
+        ? `<span class="down" title="${esc(m.lastError || "non raggiungibile")}">down</span>`
         : `<span class="ok">ok</span>`;
+      const verif = m.lastVerifiedAt
+        ? (m.verified
+          ? `<span class="ok" title="verificato ${new Date(m.lastVerifiedAt).toLocaleString()}">✓</span>`
+          : `<span class="down" title="verifica fallita">✗</span>`)
+        : `<span title="non verificato">–</span>`;
       const speed = m.avgTTFTMs ? `${m.avgTTFTMs}ms ttft` : (m.lastLatencyMs ? `${m.lastLatencyMs}ms` : "");
       row.innerHTML = `
         <input type="checkbox" ${m.enabled ? "checked" : ""} data-id="${esc(m.id)}" />
@@ -162,7 +168,7 @@ function renderProviders(s) {
           <div class="mname">${esc(m.name)} ${m.free ? `<span class="badge free">free</span>` : `<span class="badge paid">$</span>`}</div>
           <div class="minfo">${m.requests} req · ${(m.dailyTok / 1000).toFixed(1)}k tok ogg · ${speed} · ${fmtCost(m.dailyCost)} ogg</div>
         </div>
-        <div class="mstat">${stat}<br/>${m.lastError ? esc(m.lastError).slice(0, 40) : ""}</div>
+        <div class="mstat">${stat} ${verif}<br/>${m.lastError ? esc(m.lastError).slice(0, 40) : ""}</div>
       `;
       row.querySelector("input").onchange = async (e) => {
         await api("/hub/toggle", "POST", { id: m.id, enabled: e.target.checked });
@@ -295,6 +301,20 @@ function renderEnhancer(s) {
     sel.appendChild(o);
   }
   if (s.enhancer && s.enhancer.model) sel.value = s.enhancer.model;
+  const mc = document.getElementById("enhMaxChars");
+  const et = document.getElementById("enhTimeout");
+  if (document.activeElement !== mc && s.enhancer) mc.value = s.enhancer.maxChars || 4000;
+  if (document.activeElement !== et && s.enhancer) et.value = Math.round((s.enhancer.timeoutMs || 12000) / 1000);
+}
+
+function renderSettings(s) {
+  const st = s.settings || {};
+  document.getElementById("setVerifyMin").value = Math.round((st.verifyMs || 900000) / 60000);
+  document.getElementById("setTopK").value = st.verifyTopK || 6;
+  document.getElementById("setFailoverSec").value = Math.round((st.failoverMs || 45000) / 1000);
+  document.getElementById("setCacheMin").value = Math.round((st.cacheTtlMs || 600000) / 60000);
+  document.getElementById("setPort").textContent = st.port || "";
+  document.getElementById("setInfo").textContent = `concorrenza provider: ${st.provConcurrency ?? "–"} · cap stream: ${st.streamCapPerProvider ?? "–"} · token controllo: ${st.tokenSet ? "attivo" : "ASSENTE"}`;
 }
 
 function renderFeatures(s) {
@@ -443,9 +463,36 @@ document.getElementById("enhModel").onchange = async (e) => {
   poll();
 };
 document.getElementById("probeAll").onclick = async () => {
+  if (!confirm("Probe all verifica TUTTI i modelli attivi e può impiegarci minuti e saturare i rate-limit dei provider gratuiti. Continuare?")) return;
   document.getElementById("probeAll").textContent = " probing…";
   await api("/hub/probe", "POST", {});
   document.getElementById("probeAll").textContent = "Probe all";
+  poll();
+};
+document.getElementById("widgetBtn").onclick = () => window.open("modelhub://widget");
+document.getElementById("enhMaxChars").onchange = async (e) => {
+  const v = Number(e.target.value);
+  if (Number.isFinite(v) && v >= 200) { await api("/hub/enhancer", "POST", { maxChars: v }); poll(); }
+};
+document.getElementById("enhTimeout").onchange = async (e) => {
+  const v = Number(e.target.value);
+  if (Number.isFinite(v) && v >= 3) { await api("/hub/enhancer", "POST", { timeoutMs: v * 1000 }); poll(); }
+};
+document.getElementById("settingsSave").onclick = async () => {
+  const g = id => Number(document.getElementById(id).value);
+  if (!(g("setVerifyMin") > 0) || !(g("setTopK") >= 3) || !(g("setFailoverSec") >= 5) || !(g("setCacheMin") > 0)) { alert("valori non validi"); return; }
+  await api("/hub/settings", "POST", {
+    verifyMs: g("setVerifyMin") * 60000,
+    verifyTopK: g("setTopK"),
+    failoverMs: g("setFailoverSec") * 1000,
+    cacheTtlMs: g("setCacheMin") * 60000
+  });
+  poll();
+};
+document.getElementById("tokenRegen").onclick = async () => {
+  if (!confirm("Generare un nuovo token di controllo? Le finestre dell'app dovranno essere riavviate.")) return;
+  const r = await api("/hub/settings", "POST", { regenerateToken: true });
+  if (r && r.regeneratedToken) alert("Nuovo token di controllo:\n\n" + r.regeneratedToken + "\n\nConservalo ora: non verrà più mostrato.");
   poll();
 };
 document.getElementById("refresh").onclick = poll;

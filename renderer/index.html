@@ -16,8 +16,9 @@
     </div>
     <div class="actions">
       <button id="exportBtn" class="btn" title="Esporta config completa (incluse API keys)">Export</button>
+      <button id="widgetBtn" class="btn" title="Apri/chiudi il widget realtime">Widget</button>
       <button id="themeBtn" class="btn" title="Cambia tema">Tema</button>
-      <button id="probeAll" class="btn">Probe all</button>
+      <button id="probeAll" class="btn" title="Verifica TUTTI i modelli attivi (può impiegarci minuti)">Probe all</button>
       <button id="refresh" class="btn">Aggiorna</button>
     </div>
   </header>
@@ -81,7 +82,23 @@
         <div class="row">
           <select id="enhModel"></select>
         </div>
+        <div class="row">
+          <label class="check">max caratteri <input id="enhMaxChars" type="number" min="200" max="20000" step="100" style="width:70px" /></label>
+          <label class="check">timeout s <input id="enhTimeout" type="number" min="3" max="60" style="width:50px" /></label>
+        </div>
         <p class="hint">Migliora automaticamente l'ultimo messaggio utente prima del routing. Salta richieste con tool calls.</p>
+      </section>
+
+      <section class="panel">
+        <h2>Impostazioni</h2>
+        <div class="row"><label class="check">verifica profili ogni <input id="setVerifyMin" type="number" min="1" max="1440" style="width:55px" /> min</label></div>
+        <div class="row"><label class="check">modelli per verifica (top K) <input id="setTopK" type="number" min="3" max="50" style="width:45px" /></label></div>
+        <div class="row"><label class="check">budget failover <input id="setFailoverSec" type="number" min="5" max="600" style="width:55px" /> s</label></div>
+        <div class="row"><label class="check">cache TTL <input id="setCacheMin" type="number" min="1" max="1440" style="width:55px" /> min</label></div>
+        <button id="settingsSave" class="btn primary">Salva impostazioni</button>
+        <p class="hint" id="setInfo"></p>
+        <button id="tokenRegen" class="btn danger" title="Genera un nuovo token di controllo per /hub/*">Rigenera token controllo</button>
+        <p class="hint">Porta (<span id="setPort"></span>) e concorrenza richiedono il riavvio dell'app.</p>
       </section>
 
       <section class="panel">

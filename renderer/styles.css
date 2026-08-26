@@ -132,9 +132,9 @@ body.light {
 body.light .provider, body.light .panel, body.light .topbar { box-shadow: 0 1px 2px rgba(0,0,0,.05); }
 body.light .model .minfo, body.light .mstat { color: #8a93a0; }
 
-.ptoolbar { display: flex; gap: 6px; align-items: center; margin: 8px 0 10px; flex-wrap: wrap; }
-.ptoolbar input[type=search] { flex: 1; min-width: 140px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font-size: 12px; }
-.ptoolbar select { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font-size: 11px; }
+.ptoolbar { display: flex; gap: 4px; align-items: center; margin: 8px 0 10px; flex-wrap: wrap; }
+.ptoolbar input[type=search] { flex: 1 1 120px; min-width: 100px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; font-size: 11px; }
+.ptoolbar select { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px 5px; font-size: 10.5px; max-width: 132px; }
 .ptoolbar .compact { font-size: 11px; color: var(--muted); white-space: nowrap; }
 .provider .phead { cursor: pointer; user-select: none; }
 .provider .chev { color: var(--muted); width: 12px; display: inline-block; text-align: center; }

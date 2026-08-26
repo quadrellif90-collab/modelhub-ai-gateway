@@ -101,6 +101,7 @@ function createWindow() {
   });
   win.loadFile(path.join(DIR, "renderer", "index.html"), CTRL_TOKEN ? { query: { t: CTRL_TOKEN } } : undefined);
   win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url === "modelhub://widget") { toggleWidget(); return { action: "deny" }; }
     if (/^https?:\/\//i.test(url)) shell.openExternal(url);
     return { action: "deny" };
   });
