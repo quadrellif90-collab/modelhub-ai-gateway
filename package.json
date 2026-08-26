@@ -31,6 +31,12 @@
         "portable"
       ],
       "icon": "icon.png"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ]
     }
   },
   "dependencies": {
