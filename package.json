@@ -1,39 +1,39 @@
-﻿{
-    "name":  "modelhub",
-    "version":  "0.7.0",
-    "private":  true,
-    "main":  "main.js",
-    "description":  "Local multi-provider model aggregator with GUI control panel",
-    "scripts":  {
-                    "start":  "electron .",
-                    "server":  "node server.js",
-                    "test":  "node --test test/server.test.js",
-                    "dist":  "electron-builder --win portable"
-                },
-    "devDependencies":  {
-                            "electron":  "^44.0.0",
-                            "electron-builder":  "^26.15.3"
-                        },
-    "build":  {
-                  "appId":  "local.modelhub.app",
-                  "productName":  "ModelHub",
-                  "directories":  {
-                                      "output":  "dist"
-                                  },
-                  "files":  [
-                                "main.js",
-                                "server.js",
-                                "renderer/**/*",
-                                "icon.png"
-                            ],
-                  "win":  {
-                              "target":  [
-                                             "portable"
-                                         ],
-                              "icon":  "icon.png"
-                          }
-              },
-    "dependencies":  {
-                         "electron-updater":  "^6.8.9"
-                     }
+{
+  "name": "modelhub",
+  "version": "0.7.0",
+  "private": true,
+  "main": "main.js",
+  "description": "Local multi-provider model aggregator with GUI control panel",
+  "scripts": {
+    "start": "electron .",
+    "server": "node server.js",
+    "test": "node --test test/server.test.js",
+    "dist": "electron-builder --win portable"
+  },
+  "devDependencies": {
+    "electron": "^44.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "local.modelhub.app",
+    "productName": "ModelHub",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "server.js",
+      "renderer/**/*",
+      "icon.png"
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "icon": "icon.png"
+    }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  }
 }
