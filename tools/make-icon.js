@@ -2,7 +2,8 @@ const fs = require("fs");
 const zlib = require("zlib");
 const path = require("path");
 
-const W = 256, H = 256;
+const W = parseInt(process.argv[2] || "1024", 10), H = W;
+const S = W / 256;
 
 function crc32(buf) {
   let table = crc32.table;
@@ -30,7 +31,7 @@ function chunk(type, data) {
 
 // pixel: sfondo scuro arrotondato + "M" stilizzata con gradiente blu
 const raw = Buffer.alloc(H * (1 + W * 4));
-const R = 48;
+const R = Math.round(48 * S);
 for (let y = 0; y < H; y++) {
   const rowStart = y * (1 + W * 4);
   raw[rowStart] = 0;
@@ -58,8 +59,8 @@ for (let y = 0; y < H; y++) {
       pg = Math.round(60 + 60 * t);
       pb = Math.round(160 + 80 * t);
       // lettera M: due montanti + diagonali
-      const mx = x - 64, mw = 128, my = y - 72, mh = 112;
-      const bar = 18;
+      const mx = x - 64 * S, mw = 128 * S, my = y - 72 * S, mh = 112 * S;
+      const bar = Math.round(18 * S);
       const leftBar = mx >= 0 && mx < bar && my >= 0 && my < mh;
       const rightBar = mx >= mw - bar && mx < mw && my >= 0 && my < mh;
       const diagL = my >= 0 && my < mh / 2 && Math.abs(mx - (bar + (mw / 2 - bar) * (my / (mh / 2)))) < bar / 1.6;

@@ -5,7 +5,10 @@
   "main": "main.js",
   "description": "Local multi-provider AI gateway: one OpenAI-compatible endpoint over 1300+ models with autorouting, prompt enhancement and realtime tray widget",
   "license": "MIT",
-  "author": "quadrellif90-collab",
+  "author": {
+    "name": "quadrellif90-collab",
+    "email": "quadrellif90-collab@users.noreply.github.com"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/quadrellif90-collab/modelhub-ai-gateway"
