@@ -37,8 +37,7 @@
         "AppImage",
         "deb"
       ],
-      "maintainer": "quadrellif90-collab <noreply@github.com>",
-      "desktopName": "ModelHub"
+      "maintainer": "quadrellif90-collab <noreply@github.com>"
     }
   },
   "dependencies": {
