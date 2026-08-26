@@ -1,66 +1,66 @@
-﻿{
-    "name":  "modelhub-ai-gateway",
-    "version":  "0.4.0",
-    "private":  true,
-    "main":  "main.js",
-    "description":  "Local multi-provider AI gateway: one OpenAI-compatible endpoint over 1300+ models with autorouting, prompt enhancement and realtime tray widget",
-    "license":  "MIT",
-    "author":  {
-                   "name":  "quadrellif90-collab",
-                   "email":  "quadrellif90-collab@users.noreply.github.com"
-               },
-    "repository":  {
-                       "type":  "git",
-                       "url":  "https://github.com/quadrellif90-collab/modelhub-ai-gateway"
-                   },
-    "homepage":  "https://github.com/quadrellif90-collab/modelhub-ai-gateway#readme",
-    "scripts":  {
-                    "start":  "electron .",
-                    "server":  "node server.js",
-                    "test":  "node --test test/server.test.js",
-                    "dist":  "electron-builder",
-                    "dist:win":  "electron-builder --win",
-                    "dist:mac":  "electron-builder --mac",
-                    "dist:linux":  "electron-builder --linux"
-                },
-    "devDependencies":  {
-                            "electron":  "^44.0.0",
-                            "electron-builder":  "^26.15.3"
-                        },
-    "build":  {
-                  "appId":  "io.github.quadrellif90.modelhub",
-                  "productName":  "ModelHub",
-                  "directories":  {
-                                      "output":  "dist"
-                                  },
-                  "files":  [
-                                "main.js",
-                                "server.js",
-                                "renderer/**/*",
-                                "icon.png"
-                            ],
-                  "win":  {
-                              "target":  [
-                                             "portable",
-                                             "nsis"
-                                         ],
-                              "icon":  "icon.png"
-                          },
-                  "mac":  {
-                              "target":  [
-                                             "dmg",
-                                             "zip"
-                                         ],
-                              "icon":  "icon.png",
-                              "category":  "public.app-category.developer-tools"
-                          },
-                  "linux":  {
-                                "target":  [
-                                               "AppImage",
-                                               "deb"
-                                           ],
-                                "icon":  "icon.png",
-                                "category":  "Development"
-                            }
-              }
+{
+  "name": "modelhub-ai-gateway",
+  "version": "0.4.0",
+  "private": true,
+  "main": "main.js",
+  "description": "Local multi-provider AI gateway: one OpenAI-compatible endpoint over 1300+ models with autorouting, prompt enhancement and realtime tray widget",
+  "license": "MIT",
+  "author": {
+    "name": "quadrellif90-collab",
+    "email": "quadrellif90-collab@users.noreply.github.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/quadrellif90-collab/modelhub-ai-gateway"
+  },
+  "homepage": "https://github.com/quadrellif90-collab/modelhub-ai-gateway#readme",
+  "scripts": {
+    "start": "electron .",
+    "server": "node server.js",
+    "test": "node --test test/server.test.js",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "^44.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "io.github.quadrellif90.modelhub",
+    "productName": "ModelHub",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "server.js",
+      "renderer/**/*",
+      "icon.png"
+    ],
+    "win": {
+      "target": [
+        "portable",
+        "nsis"
+      ],
+      "icon": "icon.png"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "icon.png",
+      "category": "public.app-category.developer-tools"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "icon.png",
+      "category": "Development"
+    }
+  }
 }
