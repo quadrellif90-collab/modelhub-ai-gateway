@@ -17,6 +17,11 @@ http://127.0.0.1:8787/v1
 - **Widget realtime**: pannello sempre visibile agganciato alla tray icon con modello in uso, profilo attivo, richieste/token/costi del giorno e ultime richieste.
 - **Pannello di controllo web**: gestione provider e modelli (ricerca, filtri, ordinamento, modalità compatta, box collassabili), creazione guidata API key nel browser esterno, reveal/mascheramento chiavi, export completa della configurazione, toggle feature live (enhancer / cache / probe).
 - **Cache risposte** con TTL, **probe automatico** periodico dello stato di salute degli upstream.
+- **Routing per intento** (v0.7.0): `model=auto` classifica il prompt (codice/ragionamento/visione/veloce) e instrada sul profilo giusto; header `x-modelhub-model` / `x-modelhub-profile` rivelano modello e profilo risolti.
+- **Quota per chiave gateway** (v0.7.0): limite token/spesa per chiave, blocco oltre quota, uso visibile in `/hub/state`.
+- **Plugin del Prompt Enhancer** (v0.7.0): trasformazioni componibili (`concise`, `english`, `codepro`).
+- **Esperimenti A/B** (v0.7.0) e **alert webhook** su eventi (es. provider down).
+- **PWA / responsive** (v0.7.0): manifest, viewport e layout mobile per usare il pannello da smartphone.
 
 ## Installazione
 

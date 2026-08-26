@@ -36,6 +36,7 @@ async function poll() {
     if (s) {
       render(s);
       renderLogs(l.logs || []);
+      updateLastModel(l.logs || []);
     }
   } catch {
     document.getElementById("serverDot").className = "dot off";
@@ -43,6 +44,18 @@ async function poll() {
   }
 }
 
+function updateLastModel(logs) {
+  const el = document.getElementById("lastModel");
+  if (!el) return;
+  const last = logs.find(e => e.ok && e.proto && e.proto.indexOf("enhance") === -1 && e.model);
+  if (last) {
+    const prof = last.reqModel ? ` · profilo ${last.reqModel}` : "";
+    el.textContent = `↳ ${last.model}${prof}`;
+    el.title = `Ultimo modello risolto: ${last.model}${prof}`;
+  } else {
+    el.textContent = "–";
+  }
+}
 function fmtCost(c) {
   if (!c || c === 0) return "$0";
   if (c < 0.01) return "$" + c.toFixed(4);
@@ -314,7 +327,25 @@ function renderSettings(s) {
   document.getElementById("setFailoverSec").value = Math.round((st.failoverMs || 45000) / 1000);
   document.getElementById("setCacheMin").value = Math.round((st.cacheTtlMs || 600000) / 60000);
   document.getElementById("setPort").textContent = st.port || "";
+  document.getElementById("setAddr").textContent = BASE;
   document.getElementById("setInfo").textContent = `concorrenza provider: ${st.provConcurrency ?? "–"} · cap stream: ${st.streamCapPerProvider ?? "–"} · token controllo: ${st.tokenSet ? "attivo" : "ASSENTE"}`;
+  const exp = s.experiments || {};
+  document.getElementById("expOn").checked = !!exp.enabled;
+  document.getElementById("expProfile").value = exp.candidate || "";
+  document.getElementById("expSplit").value = exp.splitPct || 0;
+  document.getElementById("alertUrl").value = (s.alerts && s.alerts.webhook) || "";
+  const enh = s.enhancer || {};
+  const plugs = (enh.plugins || []).map(String);
+  document.getElementById("plugConcise").checked = plugs.includes("concise");
+  document.getElementById("plugEnglish").checked = plugs.includes("english");
+  document.getElementById("plugCode").checked = plugs.includes("codepro");
+  const f = s.features || {};
+  document.getElementById("startMin").checked = !!(f.startMinimized);
+  fetch(BASE + "/hub/keys", { headers: { "x-modelhub-token": TOKEN } }).then(r => r.ok ? r.json() : null).then(j => {
+    if (!j) return;
+    const sel = document.getElementById("klKey");
+    sel.innerHTML = (j.keys || []).map(k => `<option value="${esc(k.key)}">${esc(k.key)}${k.limit ? " (" + k.limit + " tok)" : ""}</option>`).join("") || `<option value="">nessuna chiave</option>`;
+  }).catch(() => {});
 }
 
 function renderFeatures(s) {
@@ -407,6 +438,7 @@ function enableDrag(ol) {
       const to = ids.indexOf(li.dataset.id);
       ids.splice(to, 0, ids.splice(from, 1)[0]);
       profileOrder = ids;
+      if (STATE && STATE.profileOrder) STATE.profileOrder[selectedProfile] = ids;
       renderProfiles(STATE);
     };
   });
@@ -493,6 +525,38 @@ document.getElementById("tokenRegen").onclick = async () => {
   if (!confirm("Generare un nuovo token di controllo? Le finestre dell'app dovranno essere riavviate.")) return;
   const r = await api("/hub/settings", "POST", { regenerateToken: true });
   if (r && r.regeneratedToken) alert("Nuovo token di controllo:\n\n" + r.regeneratedToken + "\n\nConservalo ora: non verrà più mostrato.");
+  poll();
+};
+document.getElementById("klSave").onclick = async () => {
+  const key = document.getElementById("klKey").value;
+  const tokens = Number(document.getElementById("klTokens").value) || 0;
+  const spend = Number(document.getElementById("klSpend").value) || 0;
+  const r = await api("/hub/keys", "POST", { key, tokens, spend });
+  document.getElementById("klInfo").textContent = r && r.ok ? "quota salvata" : "errore";
+  poll();
+};
+document.getElementById("expSave").onclick = async () => {
+  await api("/hub/experiments", "POST", {
+    enabled: document.getElementById("expOn").checked,
+    profile: document.getElementById("expProfile").value.trim() || "auto-code",
+    splitPct: Number(document.getElementById("expSplit").value) || 0
+  });
+  poll();
+};
+document.getElementById("alertSave").onclick = async () => {
+  await api("/hub/alerts", "POST", { webhook: document.getElementById("alertUrl").value.trim() });
+  poll();
+};
+document.getElementById("plugSave").onclick = async () => {
+  const plugs = [];
+  if (document.getElementById("plugConcise").checked) plugs.push("concise");
+  if (document.getElementById("plugEnglish").checked) plugs.push("english");
+  if (document.getElementById("plugCode").checked) plugs.push("codepro");
+  await api("/hub/enhancer", "POST", { plugins: plugs });
+  poll();
+};
+document.getElementById("startMin").onchange = async (e) => {
+  await api("/hub/features", "POST", { startMinimized: e.target.checked });
   poll();
 };
 document.getElementById("refresh").onclick = poll;

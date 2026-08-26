@@ -2,14 +2,17 @@
 <html lang="it">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0e1116" />
+  <link rel="manifest" href="manifest.webmanifest" />
   <title>ModelHub</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <header class="topbar">
     <div class="brand">ModelHub <span class="sub">aggregatore locale multi-provider</span></div>
-    <div id="costBadge" class="badge cost" title="Spesa di oggi / totale">–</div>
+      <div id="costBadge" class="badge cost" title="Spesa di oggi / totale">–</div>
+      <div id="lastModel" class="badge lastmodel" title="Ultimo modello risolto">–</div>
     <div class="status">
       <span id="serverDot" class="dot off"></span>
       <span id="serverText">server…</span>
@@ -99,6 +102,30 @@
         <p class="hint" id="setInfo"></p>
         <button id="tokenRegen" class="btn danger" title="Genera un nuovo token di controllo per /hub/*">Rigenera token controllo</button>
         <p class="hint">Porta (<span id="setPort"></span>) e concorrenza richiedono il riavvio dell'app.</p>
+      </section>
+
+      <section class="panel">
+        <h2>Configurazione avanzata</h2>
+        <h3>Quote per chiave gateway</h3>
+        <div class="row"><label class="check">chiave <select id="klKey"></select></label></div>
+        <div class="row"><label class="check">limite token/giorno <input id="klTokens" type="number" min="0" step="1000" style="width:90px" placeholder="0=illimitato" /></label></div>
+        <div class="row"><label class="check">limite spesa/giorno $ <input id="klSpend" type="number" min="0" step="0.01" style="width:80px" placeholder="0=illimitato" /></label></div>
+        <button id="klSave" class="btn primary">Salva quota</button>
+        <p class="hint" id="klInfo"></p>
+        <h3>Esperimenti A/B</h3>
+        <div class="row"><label class="check"><input type="checkbox" id="expOn" /> abilita routing A/B</label></div>
+        <div class="row"><label class="check">profilo candidato <input id="expProfile" type="text" style="width:120px" placeholder="auto-code" /></label></div>
+        <div class="row"><label class="check">% traffico <input id="expSplit" type="number" min="0" max="100" style="width:50px" /> %</label></div>
+        <button id="expSave" class="btn primary">Salva esperimento</button>
+        <h3>Alert webhook</h3>
+        <div class="row"><label class="check">URL webhook <input id="alertUrl" type="url" style="width:240px" placeholder="https://hooks.example.com/..." /></label></div>
+        <button id="alertSave" class="btn primary">Salva webhook</button>
+        <h3>Plugin enhancer</h3>
+        <div class="row"><label class="check"><input type="checkbox" id="plugConcise" /> conciso</label> <label class="check"><input type="checkbox" id="plugEnglish" /> inglese</label> <label class="check"><input type="checkbox" id="plugCode" /> code-pro</label></div>
+        <button id="plugSave" class="btn primary">Salva plugin</button>
+        <h3>Generali</h3>
+        <div class="row"><label class="check"><input type="checkbox" id="startMin" /> avvio ridotto (solo tray)</label></div>
+        <p class="hint">Indirizzo server: <span id="setAddr"></span></p>
       </section>
 
       <section class="panel">

@@ -3,6 +3,21 @@
 Tutte le modifiche rilevanti a ModelHub sono documentate qui.
 Il formato segue [Keep a Changelog](https://keepachangelog.com/) e il versioning segue [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] - 2026-08-26
+
+### Added
+- **Routing per intento**: `model=auto` classifica automaticamente il prompt (codice / ragionamento / visione / veloce / generale) e instrada sul profilo più adatto (`auto-code`, `auto-reasoning`, `auto-fast`); header `x-modelhub-profile` nella risposta rivela il profilo risolto.
+- **Quota per chiave gateway**: limite token e spesa per chiave (`POST /hub/keys`), applicato al gate (`gatewayAuthorized`) e alle rotte streaming (blocco `429` oltre quota); uso registrato e visibile in `/hub/state`.
+- **Plugin del Prompt Enhancer**: trasformazioni componibili (`concise`, `english`, `codepro`) attivabili dal pannello "Configurazione avanzata" (`POST /hub/enhancer {plugins}`).
+- **Esperimenti A/B**: split di traffico tra profilo corrente e candidato con percentuale configurabile (`POST /hub/experiments` + reorder in `selectCandidates`).
+- **Alert webhook**: notifiche verso URL esterno su eventi (es. provider_down) via `POST /hub/alerts` e `markFail` → `alertOnce`.
+- **Cache prefix/semantica**: `cacheKey` include un hash del prefisso (system + ultimo messaggio utente) così prompt simili condividono la risposta cached.
+- **Configurazione avanzata nella UI**: quote chiavi, esperimenti, webhook alert, plugin enhancer, avvio minimizzato in tray, indirizzo server.
+- **PWA**: `manifest.webmanifest` + viewport/theme-color + layout responsive (`@media max-width:900px`) per uso da mobile.
+
+### Changed
+- `enhancerCfg()` espone ora `plugins`; `main.js` onora `startMinimized` (avvio solo tray).
+
 ## [0.6.1] - 2026-08-26
 
 ### Fixed

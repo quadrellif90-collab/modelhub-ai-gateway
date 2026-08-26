@@ -118,6 +118,8 @@ function createWindow() {
     if (/^https?:\/\//i.test(url)) shell.openExternal(url);
     return { action: "deny" };
   });
+  if (!(prefs.features && prefs.features.startMinimized)) win.show();
+  else win.hide();
   win.on("close", (e) => { e.preventDefault(); win.hide(); });
 }
 

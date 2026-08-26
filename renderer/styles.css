@@ -86,6 +86,11 @@ code { background: var(--panel2); padding: 1px 4px; border-radius: 4px; }
   background: rgba(63,208,122,.15); color: var(--green);
   font-size: 11px; padding: 4px 10px; border-radius: 6px; white-space: nowrap;
 }
+.badge.lastmodel {
+  background: #1f3b2e; color: #7ff0c0; max-width: 320px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11px; padding: 4px 10px; border-radius: 6px;
+}
 .activity { grid-column: 1 / -1; }
 .panel.wide { margin-bottom: 0; }
 .chart { display: flex; align-items: flex-end; gap: 2px; height: 48px; margin: 8px 0 12px; }
@@ -148,3 +153,11 @@ body.light .model .minfo, body.light .mstat { color: #8a93a0; }
 .providers.compact .model .minfo { display: none; }
 .providers.compact .provider { padding: 8px 10px; }
 .providers.compact .models { margin-top: 6px; }
+
+@media (max-width: 900px) {
+  body { flex-direction: column; }
+  .col { width: 100%; flex: 1 1 auto; }
+  .topbar { flex-wrap: wrap; }
+  .topbar .actions { flex-wrap: wrap; }
+  section.panel { margin-bottom: 12px; }
+}

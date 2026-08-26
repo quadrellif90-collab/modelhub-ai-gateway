@@ -55,7 +55,7 @@ const SIGNUP_URLS = {
   xai: "https://console.x.ai",
   zai: "https://z.ai/manage-apikey/apikey-list"
 };
-const VERSION = "0.6.1";
+const VERSION = "0.7.0";
 let cacheOn = process.env.MODELHUB_CACHE !== "0";
 let autoProbeOn = AUTO_PROBE;
 const UA_HTTP = new http.Agent({ keepAlive: true, maxSockets: 64 });
@@ -223,8 +223,16 @@ function computeCost(m, promptTok, completionTok) {
 let cacheHits = 0;
 const responseCache = new Map();
 function cacheKey(oaiBody) {
-  const { stream, ...rest } = oaiBody;
-  return crypto.createHash("sha256").update(JSON.stringify(rest)).digest("hex");
+  const { stream, messages, ...rest } = oaiBody;
+  let prefix = "";
+  if (Array.isArray(messages)) {
+    const sys = (messages.find(m => m.role === "system") || {}).content;
+    const lastUser = messages.filter(m => m.role === "user").pop();
+    const lu = typeof lastUser?.content === "string" ? lastUser.content : "";
+    const sample = `${typeof sys === "string" ? sys.slice(0, 200) : ""}|${lu.slice(0, 256)}`;
+    prefix = crypto.createHash("sha1").update(sample).digest("hex").slice(0, 16);
+  }
+  return crypto.createHash("sha256").update(prefix + "|" + JSON.stringify(rest)).digest("hex");
 }
 function cacheGet(key) {
   if (!cacheOn) return null;
@@ -330,15 +338,28 @@ function isChatModel(id) {
   return !CHAT_BLOCK.test(m.label || "") && !CHAT_BLOCK.test(m.name || "");
 }
 
+function mergedOrder(manualArr, generated, enabledSet) {
+  const kept = (manualArr || []).filter(id => enabledSet.has(id) && modelMap.has(id));
+  const seen = new Set(kept);
+  const appended = generated.filter(id => !seen.has(id));
+  return kept.concat(appended);
+}
 function rebuildProfiles() {
   const enabledIds = models.filter(m => m.enabled && isChatModel(m.id)).map(m => m.id);
+  const enabledSet = new Set(enabledIds);
   const scored = enabledIds.slice().sort((a, b) => autorouteScore(b) - autorouteScore(a));
-  prefs.profiles.auto = scored;
-  prefs.profiles["auto-code"] = catFirst(scored, c => c.code);
-  prefs.profiles["auto-reasoning"] = catFirst(scored, c => c.reasoning);
-  prefs.profiles["auto-fast"] = catFirst(scored, c => c.fast);
-  prefs.profiles["free-pool"] = buildFreePool();
+  const defaultMerge = (prof, generated) => {
+    const arr = prefs.profiles[prof];
+    const base = (Array.isArray(arr) && arr.length) ? arr : generated;
+    prefs.profiles[prof] = mergedOrder(base, generated, enabledSet);
+  };
+  defaultMerge("auto", scored);
+  defaultMerge("auto-code", catFirst(scored, c => c.code));
+  defaultMerge("auto-reasoning", catFirst(scored, c => c.reasoning));
+  defaultMerge("auto-fast", catFirst(scored, c => c.fast));
+  defaultMerge("free-pool", buildFreePool());
   for (const prof of Object.keys(prefs.profiles)) {
+    if (["auto", "auto-code", "auto-reasoning", "auto-fast", "free-pool"].includes(prof)) continue;
     const arr = prefs.profiles[prof];
     if (!Array.isArray(arr)) { prefs.profiles[prof] = enabledIds.slice(); continue; }
     const set = new Set(arr);
@@ -350,6 +371,103 @@ function rebuildProfiles() {
   writeJSON(PREFS_FILE, prefs);
 }
 
+// ---------------------------------------------------------------------------
+// v0.7: per-key quota, intent routing, experiments, plugins, webhook, audit
+// ---------------------------------------------------------------------------
+const keyUsage = new Map();
+function keyIdFor(req) {
+  const a = typeof req.headers["authorization"] === "string" ? req.headers["authorization"].replace(/^Bearer\s+/i, "") : "";
+  const b = req.headers["x-api-key"] || "";
+  return a || b || null;
+}
+function keyLimit(key) {
+  if (!key) return null;
+  const lim = (prefs.keylimits && prefs.keylimits[key]) || {};
+  return { tokens: lim.tokens || 0, spend: lim.spend || 0 };
+}
+function keyUsed(key) { return keyUsage.get(key) || { tokens: 0, spent: 0 }; }
+function recordKeyUsage(key, tokens, cost) {
+  if (!key) return;
+  const u = keyUsed(key);
+  u.tokens += tokens || 0;
+  u.spent += cost || 0;
+  keyUsage.set(key, u);
+}
+function keyOverLimit(key) {
+  const lim = keyLimit(key);
+  if (!lim) return false;
+  const u = keyUsed(key);
+  if (lim.tokens && u.tokens >= lim.tokens) return true;
+  if (lim.spend && u.spent >= lim.spend) return true;
+  return false;
+}
+function classifyPrompt(text) {
+  const t = String(text || "");
+  const code = /\b(code|function|def |class |import |SELECT |regex|bug|refactor|compile|script|API|endpoint|kotlin|java|python|typescript)\b/i.test(t) || /[;{}]\s*$/.test(t.trim());
+  const reasoning = /\b(why|explain|reason|step[- ]by[- ]step|prove|analyze|compare|trade[- ]?off|math|logic|plan|strategy|hypothesis)\b/i.test(t);
+  const vision = /\b(image|picture|photo|diagram|ocr|screenshot|visual)\b/i.test(t) && /(describe|read|extract|transcribe)/i.test(t);
+  const fast = t.length < 60 && !code && !reasoning;
+  return { code, reasoning, vision, fast, general: !code && !reasoning && !vision };
+}
+function resolveProfile(requested, messages) {
+  if (requested && requested !== "auto" && !String(requested).startsWith("auto-intent")) return requested;
+  const last = (messages || []).filter(m => m.role === "user").pop();
+  const txt = last ? (typeof last.content === "string" ? last.content : JSON.stringify(last.content)) : "";
+  const it = classifyPrompt(txt);
+  if (it.code) return "auto-code";
+  if (it.reasoning) return "auto-reasoning";
+  if (it.fast) return "auto-fast";
+  return "auto";
+}
+const ENHANCE_PLUGINS = {
+  concise: { label: "Conciso", transform: (sys, user) => ({ system: (sys ? sys + "\n" : "") + "Rispondi in modo conciso e diretto.", user }) },
+  english: { label: "Inglese", transform: (sys, user) => ({ system: (sys ? sys + "\n" : "") + "Respond in English.", user }) },
+  codepro: { label: "Code pro", transform: (sys, user) => ({ system: (sys ? sys + "\n" : "") + "You are an expert software engineer. Prefer correct, minimal code.", user }) }
+};
+function applyPlugins(system, user) {
+  const ids = (prefs.enhancer && Array.isArray(prefs.enhancer.plugins)) ? prefs.enhancer.plugins : [];
+  for (const id of ids) {
+    const p = ENHANCE_PLUGINS[id];
+    if (p) { const r = p.transform(system, user); system = r.system; user = r.user; }
+  }
+  return { system, user };
+}
+function experimentFor(profile) {
+  const e = prefs.experiments;
+  if (!e || !e.enabled || e.profile !== profile || !e.candidate) return null;
+  return e;
+}
+function maybeExperiment(profile, order) {
+  const e = experimentFor(profile);
+  if (!e) return order;
+  if (order[0] === e.candidate) return order;
+  const pct = Math.max(0, Math.min(100, e.splitPct || 0));
+  if (Math.floor(Math.random() * 100) < pct) return [e.candidate, ...order.filter(id => id !== e.candidate)];
+  return order;
+}
+function alertWebhook(url, event, payload) {
+  if (!url) return;
+  try {
+    const u = new URL(url);
+    const body = JSON.stringify({ event, ts: Date.now(), ...payload });
+    const transport = u.protocol === "https:" ? https : http;
+    const req = transport.request({
+      agent: upstreamAgent(u), method: "POST", hostname: u.hostname, port: u.port || undefined,
+      path: u.pathname + (u.search || ""), headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) }
+    }, () => {});
+    req.on("error", () => {});
+    req.write(body); req.end();
+  } catch {}
+}
+const alertState = {};
+function alertOnce(key, event, payload) {
+  const now = Date.now();
+  if (alertState[key] && now - alertState[key] < 600000) return;
+  alertState[key] = now;
+  const url = prefs.alerts && prefs.alerts.webhook;
+  if (url) alertWebhook(url, event, payload);
+}
+
 function buildFreePool() {
   return models.filter(m => m.enabled && m.free && isChatModel(m.id))
     .map(m => m.id)
@@ -357,6 +475,7 @@ function buildFreePool() {
 }
 
 function markFail(m, err, retryAfterMs) {
+  const wasHealthy = !m.failUntil || m.failUntil <= Date.now();
   m.lifetimeFails = (m.lifetimeFails || 0) + 1;
   m.lastFailAt = Date.now();
   const base = retryAfterMs || Math.min(60000 * Math.pow(2, Math.min(m.fails, 6)), 3600000);
@@ -364,6 +483,7 @@ function markFail(m, err, retryAfterMs) {
   m.failUntil = Date.now() + base;
   m.halfOpen = false;
   m.lastError = String(err).slice(0, 200);
+  if (wasHealthy) alertOnce("provider:" + m.id, "provider_down", { model: m.id, error: m.lastError });
 }
 function markOk(m) {
   m.lastOkAt = Date.now();
@@ -377,9 +497,10 @@ function bumpRequest(m) {
   m.requests++;
   m.dailyReq++;
 }
-function addTokens(m, n, promptTok, completionTok) {
+function addTokens(m, n, promptTok, completionTok, key) {
   if (!n && !promptTok && !completionTok) return;
   if (m.day !== today()) { m.day = today(); m.dailyReq = 0; m.dailyTok = 0; m.dailyCost = 0; }
+  const beforeCost = m.dailyCost || 0;
   if (n) m.tokens += n;
   if (promptTok || completionTok) {
     const cost = computeCost(m, promptTok || 0, completionTok || 0);
@@ -389,8 +510,12 @@ function addTokens(m, n, promptTok, completionTok) {
     m.lastCompletionTok = completionTok || 0;
   }
   m.dailyTok += (n || (promptTok || 0) + (completionTok || 0));
+  if (key) {
+    const delta = (m.dailyCost || 0) - beforeCost;
+    recordKeyUsage(key, (n || (promptTok || 0) + (completionTok || 0)), delta);
+  }
 }
-function captureUsage(chunk, m) {
+function captureUsage(chunk, m, key) {
   try {
     const s = chunk.toString();
     let i = s.indexOf('"usage"');
@@ -404,7 +529,7 @@ function captureUsage(chunk, m) {
       if (mt || mp || mc) {
         addTokens(m, mt ? parseInt(mt[1], 10) : 0,
           mp ? parseInt(mp[1], 10) : 0,
-          mc ? parseInt(mc[1], 10) : 0);
+          mc ? parseInt(mc[1], 10) : 0, key);
       }
       i = s.indexOf('"usage"', i + 1);
     }
@@ -470,7 +595,8 @@ function enhancerCfg() {
     enabled: typeof e.enabled === "boolean" ? e.enabled : process.env.MODELHUB_ENHANCE !== "0",
     model: modelMap.has(e.model) ? e.model : null,
     maxChars: e.maxChars || 4000,
-    timeoutMs: e.timeoutMs || 12000
+    timeoutMs: e.timeoutMs || 12000,
+    plugins: Array.isArray(e.plugins) ? e.plugins : []
   };
 }
 async function maybeEnhance(body, req) {
@@ -517,8 +643,9 @@ async function maybeEnhance(body, req) {
       } else {
         throw new Error(r.error || "bad enhancer response");
       }
-      out = out.replace(/^```[^\n]*\n?/, "").replace(/```\s*$/, "").trim();
-      if (!out || out.length < 8) throw new Error("empty enhancement");
+       out = out.replace(/^```[^\n]*\n?/, "").replace(/```\s*$/, "").trim();
+       out = applyPlugins(sys, out).user;
+       if (!out || out.length < 8) throw new Error("empty enhancement");
       enhanced = out;
       recordRequest({ proto: "enhance", reqModel: body.model, model: em.id, ok: true, error: "", latencyMs: r.latencyMs || 0, ttftMs: null, promptTok: r.promptTok || 0, completionTok: r.completionTok || 0, totalTok: r.totalTok || 0, cost: computeCost(em, r.promptTok || 0, r.completionTok || 0), cached: false });
       if (enhanceCache.size > 500) enhanceCache.clear();
@@ -544,7 +671,7 @@ function selectCandidates(modelId, profile) {
   if (modelId && modelMap.has(modelId) && modelMap.get(modelId).enabled) return [modelId];
   const stripped = modelId && modelId.includes("/") ? modelId.slice(modelId.indexOf("/") + 1) : modelId;
   if (stripped && modelMap.has(stripped) && modelMap.get(stripped).enabled) return [stripped];
-  const order = prefs.profiles[profile] || prefs.profiles.auto || [];
+  const order = maybeExperiment(profile, prefs.profiles[profile] || prefs.profiles.auto || []);
   const now = Date.now();
   const healthy = order.filter(id => {
     const m = modelMap.get(id);
@@ -573,7 +700,7 @@ function parseRetryAfter(upRes, body) {
 // ---------------------------------------------------------------------------
 // upstream call (non-streaming: Promise<object>)
 // ---------------------------------------------------------------------------
-async function postNonStreaming(m, openaiBody) {
+async function postNonStreaming(m, openaiBody, key) {
   let u;
   try { u = new URL(m.baseURL); } catch { markFail(m, "bad url"); return { ok: false, error: "bad url" }; }
   await acquireSlot(m.provider);
@@ -619,7 +746,7 @@ async function postNonStreaming(m, openaiBody) {
           const u2 = data.usage || {};
           const pt = u2.prompt_tokens || 0;
           const ct = u2.completion_tokens || 0;
-          addTokens(m, u2.total_tokens || (pt + ct), pt, ct);
+          addTokens(m, u2.total_tokens || (pt + ct), pt, ct, key);
           resolve({ ok: true, data, promptTok: pt, completionTok: ct, totalTok: pt + ct, latencyMs });
         } catch {
           resolve({ ok: false, error: "bad json from upstream" });
@@ -637,8 +764,8 @@ async function postNonStreaming(m, openaiBody) {
 // ---------------------------------------------------------------------------
 // non-streaming con failover sui candidati del profilo
 // ---------------------------------------------------------------------------
-async function postWithFailover(openaiBody) {
-  const profile = (openaiBody.model && prefs.profiles[openaiBody.model]) ? openaiBody.model : "auto";
+async function postWithFailover(openaiBody, key) {
+  const profile = resolveProfile(openaiBody.model, openaiBody.messages);
   const strategy = strategyFor(profile);
   const tried = [];
   const ck = cacheKey(openaiBody);
@@ -658,7 +785,7 @@ async function postWithFailover(openaiBody) {
     if (!m || !m.enabled) continue;
     if (Date.now() - chainStart > CHAIN_BUDGET) { lastError = "failover budget exhausted"; break; }
     tried.push(id);
-    const r = await postNonStreaming(m, { ...openaiBody, model: m.name });
+    const r = await postNonStreaming(m, { ...openaiBody, model: m.name }, key);
     if (!r.ok) { lastError = `${id}: ${r.error}`; continue; }
     if (!cascadeValid(r.data)) {
       lastError = `${id}: skipped (empty/invalid content)`;
@@ -964,12 +1091,16 @@ function controlAuthorized(req) {
   return h === token || auth === token || q === token;
 }
 function gatewayAuthorized(req) {
-  if (!prefs.gatewayKeys || !prefs.gatewayKeys.length) return true;
   const auth = typeof req.headers["authorization"] === "string"
     ? req.headers["authorization"].replace(/^Bearer\s+/i, "")
     : "";
   const alt = req.headers["x-api-key"] || "";
-  return prefs.gatewayKeys.includes(auth) || prefs.gatewayKeys.includes(alt);
+  const key = auth || alt || null;
+  if (!prefs.gatewayKeys || !prefs.gatewayKeys.length) return true;
+  const ok = prefs.gatewayKeys.includes(auth) || prefs.gatewayKeys.includes(alt);
+  if (!ok) return false;
+  if (key && keyOverLimit(key)) return false;
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1094,6 +1225,10 @@ function controlState() {
     cache: { enabled: cacheOn, size: responseCache.size, hits: cacheHits, ttlMs: CACHE_TTL_MS },
     features: featuresCfg(),
     settings: settingsCfg(),
+    experiments: prefs.experiments || null,
+    alerts: prefs.alerts || null,
+    keylimits: prefs.keylimits || null,
+    plugins: Object.keys(ENHANCE_PLUGINS),
     totals: { req: totals.req, tok: totals.tok, cost: Math.round(totals.cost * 1e4) / 1e4, lifetimeCost: Math.round(totals.lifetimeCost * 1e4) / 1e4, healthy: totals.healthy },
     models: models.map(m => ({
       id: m.id, provider: m.provider, label: m.label, name: m.name,
@@ -1195,6 +1330,7 @@ async function handleControl(req, res, url) {
     const f = prefs.features || (prefs.features = {});
     if (typeof body.cache === "boolean") { f.cache = body.cache; cacheOn = body.cache; }
     if (typeof body.autoProbe === "boolean") { f.autoProbe = body.autoProbe; autoProbeOn = body.autoProbe; }
+    if (typeof body.startMinimized === "boolean") f.startMinimized = body.startMinimized;
     writeJSON(PREFS_FILE, prefs);
     return sendJSON(res, 200, { ok: true, features: featuresCfg() });
   }
@@ -1290,6 +1426,7 @@ async function handleControl(req, res, url) {
   if (url === "/hub/enhancer") {
     const e = prefs.enhancer || (prefs.enhancer = {});
     if (typeof body.enabled === "boolean") e.enabled = body.enabled;
+    if (Array.isArray(body.plugins)) e.plugins = body.plugins.map(String);
     if (body.model !== undefined) {
       if (body.model && !modelMap.has(body.model)) return sendJSON(res, 400, { error: "unknown model" });
       e.model = body.model || "";
@@ -1317,6 +1454,30 @@ async function handleControl(req, res, url) {
     responseCache.clear();
     cacheHits = 0;
     return sendJSON(res, 200, { ok: true });
+  }
+  if (url === "/hub/keys") {
+    if (req.method === "GET") {
+      const keys = (prefs.gatewayKeys || []).map(k => ({ key: k, limit: keyLimit(k), used: keyUsed(k) }));
+      return sendJSON(res, 200, { keys });
+    }
+    const k = body.key || (prefs.gatewayKeys && prefs.gatewayKeys[0]) || null;
+    if (!k) return sendJSON(res, 400, { error: "no gateway key" });
+    prefs.keylimits = prefs.keylimits || {};
+    const lim = prefs.keylimits[k] || (prefs.keylimits[k] = {});
+    if (Number.isFinite(body.tokens)) lim.tokens = body.tokens;
+    if (Number.isFinite(body.spend)) lim.spend = body.spend;
+    writeJSON(PREFS_FILE, prefs);
+    return sendJSON(res, 200, { ok: true, key: k, limit: keyLimit(k) });
+  }
+  if (url === "/hub/experiments" && req.method === "POST") {
+    prefs.experiments = { enabled: !!body.enabled, profile: body.profile || "auto", candidate: body.candidate || "", splitPct: Number.isFinite(body.splitPct) ? body.splitPct : 0 };
+    writeJSON(PREFS_FILE, prefs);
+    return sendJSON(res, 200, { ok: true, experiments: prefs.experiments });
+  }
+  if (url === "/hub/alerts" && req.method === "POST") {
+    prefs.alerts = { webhook: body.webhook || "" };
+    writeJSON(PREFS_FILE, prefs);
+    return sendJSON(res, 200, { ok: true, alerts: prefs.alerts });
   }
   if (url === "/hub/discover") {
     const runProvider = async (p) => {
@@ -1485,7 +1646,7 @@ const server = http.createServer(async (req, res) => {
     if (parsedChat) await maybeEnhance(parsedChat, req);
     if (parsedChat && parsedChat.stream === true) {
       const parsed = parsedChat;
-      const profile = (parsed.model && prefs.profiles[parsed.model]) ? parsed.model : "auto";
+      const profile = resolveProfile(parsed.model, parsed.messages);
       const candidates = selectCandidates(parsed.model, profile);
       const chainStart = Date.now();
       const CHAIN_BUDGET = settingsCfg().failoverMs;
@@ -1498,6 +1659,12 @@ const server = http.createServer(async (req, res) => {
         chainClosed = true;
         try { res.writeHead(code, { "Content-Type": "application/json" }); res.end(JSON.stringify(obj)); } catch {}
       };
+      const key = keyIdFor(req);
+      if (key && keyOverLimit(key)) {
+        recordRequest({ proto: "stream:openai", reqModel: parsed.model, model: null, ok: false, error: "key limit reached", latencyMs: 0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
+        terminal(429, { error: "key limit reached" });
+        return;
+      }
       const attempt = () => {
         if (clientStarted || chainClosed) { safeEnd(); return; }
         if (!candidates.length) {
@@ -1571,7 +1738,7 @@ const server = http.createServer(async (req, res) => {
             attempt();
           };
           pt.on("data", c => {
-            captureUsage(c, m);
+            captureUsage(c, m, key);
             if (!saw) {
               const txt = c.toString("utf8");
               if (/\"content\"\s*:\s*\"(?:\\.|[^\"\\])+/.test(txt) || /\"tool_calls\"/.test(txt)) {
@@ -1596,6 +1763,7 @@ const server = http.createServer(async (req, res) => {
               const ttft = firstAt - t0;
               m.lastTTFTMs = ttft;
               m.avgTTFTMs = m.avgTTFTMs ? Math.round((m.avgTTFTMs * 3 + ttft) / 4) : ttft;
+              try { res.setHeader("x-modelhub-model", id); res.setHeader("x-modelhub-profile", String(parsed.model || "")); } catch {}
               try { res.writeHead(upRes.statusCode, upRes.headers); } catch {}
               for (const h of held) res.write(h);
               held = [];
@@ -1643,9 +1811,11 @@ const server = http.createServer(async (req, res) => {
 
     // OpenAI non-streaming
     if (req.method === "POST" && url.includes("chat/completions") && parsedChat) {
-      const r = await postWithFailover(parsedChat);
+      const r = await postWithFailover(parsedChat, keyIdFor(req));
       if (r.ok) {
         res.setHeader("Content-Type", "application/json");
+        if (r.data && r.data.model) { try { res.setHeader("x-modelhub-model", String(r.data.model)); } catch {} }
+        try { res.setHeader("x-modelhub-profile", String(resolveProfile(parsedChat.model, parsedChat.messages) || parsedChat.model || "")); } catch {}
         res.end(JSON.stringify(r.data));
         return;
       }
@@ -1658,7 +1828,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && url.endsWith("/embeddings")) {
       const parsed = await readBody(req);
       if (!parsed || !parsed.model) { res.writeHead(400); return res.end("missing model"); }
-      const profile = (parsed.model && prefs.profiles[parsed.model]) ? parsed.model : "auto";
+      const profile = resolveProfile(parsed.model, parsed.messages);
       const candidates = selectCandidates(parsed.model, profile).slice(0, 3);
       for (const id of candidates) {
         const m = modelMap.get(id);
