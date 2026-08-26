@@ -2402,6 +2402,10 @@
         {
           "name": "canopylabs/orpheus-arabic-saudi",
           "free": true
+        },
+        {
+          "name": "qwen/qwen3.8-27b",
+          "free": false
         }
       ]
     },
@@ -2423,6 +2427,210 @@
         {
           "name": "gemini-1.5-flash",
           "free": true
+        },
+        {
+          "name": "models/gemini-2.5-flash",
+          "free": false
+        },
+        {
+          "name": "models/gemini-2.5-pro",
+          "free": false
+        },
+        {
+          "name": "models/gemini-2.5-flash-preview-tts",
+          "free": false
+        },
+        {
+          "name": "models/gemini-2.5-pro-preview-tts",
+          "free": false
+        },
+        {
+          "name": "models/gemma-4-26b-a4b-it",
+          "free": false
+        },
+        {
+          "name": "models/gemma-4-31b-it",
+          "free": false
+        },
+        {
+          "name": "models/gemini-flash-latest",
+          "free": false
+        },
+        {
+          "name": "models/gemini-flash-lite-latest",
+          "free": false
+        },
+        {
+          "name": "models/gemini-pro-latest",
+          "free": false
+        },
+        {
+          "name": "models/gemini-2.5-flash-lite",
+          "free": false
+        },
+        {
+          "name": "models/gemini-2.5-flash-image",
+          "free": false
+        },
+        {
+          "name": "models/gemini-3-flash-preview",
+          "free": false
+        },
+        {
+          "name": "models/gemini-3.1-pro-preview",
+          "free": false
+        },
+        {
+          "name": "models/gemini-3.1-pro-preview-customtools",
+          "free": false
+        },
+        {
+          "name": "models/gemini-3.1-flash-lite-preview",
+          "free": false
+        },
+        {
+          "name": "models/gemini-3.1-flash-lite",
+          "free": false
+        },
+        {
+          "name": "models/gemini-3-pro-image-preview",
+          "free": false
+        },
+        {
+          "name": "models/gemini-3-pro-image",
+          "free": false
+        },
+        {
+          "name": "models/nano-banana-pro-preview",
+          "free": false
+        },
+        {
+          "name": "models/gemini-3.1-flash-image-preview",
+          "free": false
+        },
+        {
+          "name": "models/gemini-3.1-flash-image",
+          "free": false
+        },
+        {
+          "name": "models/gemini-3.1-flash-lite-image",
+          "free": false
+        },
+        {
+          "name": "models/gemini-3.5-flash",
+          "free": false
+        },
+        {
+          "name": "models/gemini-3.5-flash-lite",
+          "free": false
+        },
+        {
+          "name": "models/gemini-omni-flash-preview",
+          "free": false
+        },
+        {
+          "name": "models/gemini-3.6-flash",
+          "free": false
+        },
+        {
+          "name": "models/gemini-3.7-flash",
+          "free": false
+        },
+        {
+          "name": "models/lyria-3-clip-preview",
+          "free": false
+        },
+        {
+          "name": "models/lyria-3-pro-preview",
+          "free": false
+        },
+        {
+          "name": "models/gemini-3.1-flash-tts-preview",
+          "free": false
+        },
+        {
+          "name": "models/gemini-robotics-er-1.6-preview",
+          "free": false
+        },
+        {
+          "name": "models/gemini-robotics-er-2-preview",
+          "free": false
+        },
+        {
+          "name": "models/gemini-2.5-computer-use-preview-10-2025",
+          "free": false
+        },
+        {
+          "name": "models/antigravity-preview-05-2026",
+          "free": false
+        },
+        {
+          "name": "models/deep-research-max-preview-04-2026",
+          "free": false
+        },
+        {
+          "name": "models/deep-research-preview-04-2026",
+          "free": false
+        },
+        {
+          "name": "models/deep-research-pro-preview-12-2025",
+          "free": false
+        },
+        {
+          "name": "models/gemini-embedding-001",
+          "free": false
+        },
+        {
+          "name": "models/gemini-embedding-2-preview",
+          "free": false
+        },
+        {
+          "name": "models/gemini-embedding-2",
+          "free": false
+        },
+        {
+          "name": "models/aqa",
+          "free": false
+        },
+        {
+          "name": "models/veo-3.1-generate-preview",
+          "free": false
+        },
+        {
+          "name": "models/veo-3.1-fast-generate-preview",
+          "free": false
+        },
+        {
+          "name": "models/veo-3.1-lite-generate-preview",
+          "free": false
+        },
+        {
+          "name": "models/gemini-2.5-flash-native-audio-latest",
+          "free": false
+        },
+        {
+          "name": "models/gemini-2.5-flash-native-audio-preview-09-2025",
+          "free": false
+        },
+        {
+          "name": "models/gemini-2.5-flash-native-audio-preview-12-2025",
+          "free": false
+        },
+        {
+          "name": "models/gemini-3.1-flash-live-preview",
+          "free": false
+        },
+        {
+          "name": "models/gemini-robotics-er-2-streaming-preview",
+          "free": false
+        },
+        {
+          "name": "models/gemini-3.5-live-translate-preview",
+          "free": false
+        },
+        {
+          "name": "models/lyria-realtime-exp",
+          "free": false
         }
       ]
     },
@@ -4683,6 +4891,18 @@
         {
           "name": "MiniMaxAI/MiniMax-M2.1",
           "free": true
+        },
+        {
+          "name": "ibm-granite/granite-4.2-30b",
+          "free": false
+        },
+        {
+          "name": "ibm-granite/granite-4.2-3b",
+          "free": false
+        },
+        {
+          "name": "ibm-granite/granite-4.2-8b",
+          "free": false
         }
       ]
     },
@@ -5744,6 +5964,10 @@
         {
           "name": "qwen/qwen-2-7b-instruct",
           "free": true
+        },
+        {
+          "name": "inclusionai/ling-3.0-flash-fin",
+          "free": false
         }
       ]
     },

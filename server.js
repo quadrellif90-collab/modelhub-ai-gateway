@@ -1,4 +1,4 @@
-const http = require("node:http");
+﻿const http = require("node:http");
 const https = require("node:https");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -56,9 +56,27 @@ const SIGNUP_URLS = {
   xai: "https://console.x.ai",
   zai: "https://z.ai/manage-apikey/apikey-list"
 };
-const VERSION = "0.3.0";
+const VERSION = "0.4.0";
 let cacheOn = process.env.MODELHUB_CACHE !== "0";
 let autoProbeOn = AUTO_PROBE;
+const UA_HTTP = new http.Agent({ keepAlive: true, maxSockets: 64 });
+const UA_HTTPS = new https.Agent({ keepAlive: true, maxSockets: 64 });
+function upstreamAgent(u) { return u.protocol === "https:" ? UA_HTTPS : UA_HTTP; }
+const PROV_CONCURRENCY = Math.max(1, parseInt(process.env.MODELHUB_PROVIDER_CONCURRENCY || "4", 10));
+const provSlots = new Map();
+async function acquireSlot(provider) {
+  let s = provSlots.get(provider);
+  if (!s) { s = { active: 0, queue: [] }; provSlots.set(provider, s); }
+  if (s.active < PROV_CONCURRENCY) { s.active++; return; }
+  await new Promise(r => s.queue.push(r));
+}
+function releaseSlot(provider) {
+  const s = provSlots.get(provider);
+  if (!s) return;
+  const next = s.queue.shift();
+  if (next) next();
+  else s.active = Math.max(0, s.active - 1);
+}
 
 // ---------------------------------------------------------------------------
 // crittografia chiavi (AES-256-GCM, key derivata dalla macchina)
@@ -117,15 +135,16 @@ function readJSON(file, fallback) {
 function writeJSON(file, obj) {
   try { fs.writeFileSync(file, JSON.stringify(obj, null, 2)); } catch (e) { log("write err " + file + ": " + e.message); }
 }
+let authWasPlain = false;
 function readAuth() {
   try {
     const raw = fs.readFileSync(AUTH_FILE, "utf8");
     let obj = null;
     try { obj = JSON.parse(raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw); } catch { obj = null; }
-    if (looksLikeAuth(obj)) return obj;
     if (obj && typeof obj === "object" && obj.v === 1 && obj.iv && obj.cipher) {
       try { return decryptAuth(obj); } catch { return {}; }
     }
+    if (looksLikeAuth(obj)) { authWasPlain = true; return obj; }
     return {};
   } catch { return {}; }
 }
@@ -543,16 +562,19 @@ function parseRetryAfter(upRes, body) {
 // ---------------------------------------------------------------------------
 // upstream call (non-streaming: Promise<object>)
 // ---------------------------------------------------------------------------
-function postNonStreaming(m, openaiBody) {
-  return new Promise((resolve) => {
+async function postNonStreaming(m, openaiBody) {
+  let u;
+  try { u = new URL(m.baseURL); } catch { markFail(m, "bad url"); return { ok: false, error: "bad url" }; }
+  await acquireSlot(m.provider);
+  try {
+    return await new Promise((resolve) => {
     const payload = JSON.stringify({ ...openaiBody, model: m.name, stream: false });
     const t0 = Date.now();
-    let u;
-    try { u = new URL(m.baseURL); } catch { markFail(m, "bad url"); return resolve({ ok: false, error: "bad url" }); }
     const transport = u.protocol === "https:" ? https : http;
     const req = transport.request({
+      agent: upstreamAgent(u),
       method: "POST",
-      hostname: u.hostname,
+      hostname: u.hostname, port: u.port || undefined,
       path: u.pathname + (u.search || ""),
       headers: {
         "Content-Type": "application/json",
@@ -597,7 +619,8 @@ function postNonStreaming(m, openaiBody) {
     req.setTimeout(UPSTREAM_TIMEOUT_NONSTREAM_MS, () => { req.destroy(new Error("timeout")); markFail(m, "timeout", null); resolve({ ok: false, error: "timeout" }); });
     req.write(payload);
     req.end();
-  });
+    });
+  } finally { releaseSlot(m.provider); }
 }
 
 // ---------------------------------------------------------------------------
@@ -721,8 +744,9 @@ function streamWithFailover(openaiBody, res, protocol) {
         try { u = new URL(m.baseURL); } catch { markFail(m, "bad url"); continue; }
         const transport = u.protocol === "https:" ? https : http;
         const req = transport.request({
+          agent: upstreamAgent(u),
           method: "POST",
-          hostname: u.hostname,
+          hostname: u.hostname, port: u.port || undefined,
           path: u.pathname + (u.search || ""),
           headers: {
             "Content-Type": "application/json",
@@ -935,8 +959,9 @@ function fetchJSON(targetURL, apiKey) {
     try { u = new URL(targetURL); } catch { return reject(new Error("bad url")); }
     const transport = u.protocol === "https:" ? https : http;
     const req = transport.request({
+      agent: upstreamAgent(u),
       method: "GET",
-      hostname: u.hostname,
+      hostname: u.hostname, port: u.port || undefined,
       path: u.pathname + (u.search || ""),
       headers: { "Authorization": apiKey ? `Bearer ${apiKey}` : "", "Accept": "application/json" }
     }, (res) => {
@@ -959,8 +984,9 @@ function embeddingsForward(m, body) {
     try { u = new URL(deriveEndpoint(m.baseURL, "embeddings")); } catch { return resolve({ ok: false, error: "bad url" }); }
     const transport = u.protocol === "https:" ? https : http;
     const req = transport.request({
+      agent: upstreamAgent(u),
       method: "POST",
-      hostname: u.hostname,
+      hostname: u.hostname, port: u.port || undefined,
       path: u.pathname + (u.search || ""),
       headers: { "Content-Type": "application/json", "Authorization": m.key ? `Bearer ${m.key}` : "", "Content-Length": Buffer.byteLength(payload) }
     }, (upRes) => {
@@ -1078,6 +1104,39 @@ async function handleControl(req, res, url) {
     return res.end(JSON.stringify(payload, null, 2));
   }
 
+  if (url === "/hub/import" && req.method === "POST") {
+    let parsedInc = null;
+    try { parsedInc = await readBody(req); } catch {}
+    const inc = parsedInc && typeof parsedInc === "object" ? parsedInc : null;
+    if (!inc || (!inc.config && !inc.prefs && !inc.keys)) return sendJSON(res, 400, { error: "nothing to import" });
+    const imported = { providers: 0, keys: 0, profiles: 0 };
+    if (inc.config && Array.isArray(inc.config.providers)) {
+      config = Object.assign({}, inc.config, { port: config.port });
+      imported.providers = config.providers.length;
+      writeJSON(CONFIG_FILE, config);
+    }
+    if (inc.keys && typeof inc.keys === "object") {
+      for (const [k, v] of Object.entries(inc.keys)) {
+        auth[k] = typeof v === "string" ? v : v.key;
+        imported.keys++;
+      }
+      writeAuth(auth);
+    }
+    if (inc.prefs && typeof inc.prefs === "object") {
+      for (const k of ["enabled", "profiles", "strategy", "gatewayKeys", "enhancer", "features"]) {
+        if (inc.prefs[k] !== undefined) prefs[k] = inc.prefs[k];
+      }
+      imported.profiles = Object.keys(prefs.profiles || {}).length;
+      writeJSON(PREFS_FILE, prefs);
+    }
+    if (inc.pricing && typeof inc.pricing === "object" && inc.pricing.providers) {
+      pricing = inc.pricing;
+      writeJSON(PRICING_FILE, pricing);
+    }
+    rebuildModels();
+    return sendJSON(res, 200, { ok: true, imported });
+  }
+
   const body = await readBody(req);
   if (url === "/hub/key/reveal" && body.provider) {
     const p = config.providers.find(x => x.name === body.provider);
@@ -1125,20 +1184,33 @@ async function handleControl(req, res, url) {
     return sendJSON(res, 200, { ok: true });
   }
   if (url === "/hub/provider/add" && body.name && body.baseURL) {
-    if (!config.providers.find(p => p.name === body.name)) {
-      config.providers.push({
-        name: body.name,
-        label: body.label || body.name,
-        baseURL: body.baseURL,
-        authId: body.authId || null,
-        needsKey: !!body.needsKey,
-        models: (body.models || []).map(m => ({ name: m.name, free: !!m.free }))
-      });
-      writeJSON(CONFIG_FILE, config);
-      rebuildModels();
-      return sendJSON(res, 200, { ok: true });
+    if (config.providers.find(p => p.name === body.name)) return sendJSON(res, 409, { error: "provider exists" });
+    const authId = body.authId || (body.key ? body.name : null);
+    const prov = {
+      name: body.name,
+      label: body.label || body.name,
+      baseURL: body.baseURL,
+      authId,
+      needsKey: !!body.needsKey,
+      models: (body.models || []).map(m => ({ name: m.name || m, free: !!(m.free) }))
+    };
+    if (body.key && authId && !authId.startsWith("env:")) { auth[authId] = body.key; writeAuth(auth); }
+    config.providers.push(prov);
+    let discovered = null;
+    if (body.discover !== false && /^https?:/i.test(prov.baseURL)) {
+      try {
+        const list = await fetchJSON(deriveEndpoint(prov.baseURL, "models"), resolveKey(authId));
+        prov.models = prov.models || [];
+        for (const it of (list.data || [])) {
+          const name = typeof it === "string" ? it : it.id;
+          if (name && !prov.models.some(x => x.name === name)) prov.models.push({ name, free: false });
+        }
+        discovered = prov.models.length;
+      } catch (e) { discovered = 0; }
     }
-    return sendJSON(res, 409, { error: "provider exists" });
+    writeJSON(CONFIG_FILE, config);
+    rebuildModels();
+    return sendJSON(res, 200, { ok: true, discovered, models: prov.models.length });
   }
   if (url === "/hub/provider/remove" && body.name) {
     config.providers = config.providers.filter(p => p.name !== body.name);
@@ -1185,27 +1257,42 @@ async function handleControl(req, res, url) {
     cacheHits = 0;
     return sendJSON(res, 200, { ok: true });
   }
-  if (url === "/hub/discover" && body.provider) {
-    const p = config.providers.find(x => x.name === body.provider);
-    if (!p) return sendJSON(res, 404, { error: "provider not found" });
-    try {
-      const list = await fetchJSON(deriveEndpoint(p.baseURL, "models"), resolveKey(p.authId));
-      const known = new Set((p.models || []).map(m => m.name));
-      let added = 0;
-      for (const it of (list.data || [])) {
-        const name = typeof it === "string" ? it : it.id;
-        if (!name || known.has(name)) continue;
+  if (url === "/hub/discover") {
+    const runProvider = async (p) => {
+      try {
+        const list = await fetchJSON(deriveEndpoint(p.baseURL, "models"), resolveKey(p.authId));
+        const known = new Set((p.models || []).map(m => m.name));
         p.models = p.models || [];
-        p.models.push({ name, free: false });
-        known.add(name);
-        added++;
+        let added = 0;
+        for (const it of (list.data || [])) {
+          const name = typeof it === "string" ? it : it.id;
+          if (!name || known.has(name)) continue;
+          p.models.push({ name, free: false });
+          known.add(name);
+          added++;
+        }
+        return { provider: p.name, added, total: p.models.length, error: "" };
+      } catch (e) {
+        return { provider: p.name, added: 0, total: (p.models || []).length, error: String((e && e.message) || e).slice(0, 120) };
       }
+    };
+    if (body.provider) {
+      const p = config.providers.find(x => x.name === body.provider);
+      if (!p) return sendJSON(res, 404, { error: "provider not found" });
+      const results = [await runProvider(p)];
       writeJSON(CONFIG_FILE, config);
       rebuildModels();
-      return sendJSON(res, 200, { ok: true, added, total: (p.models || []).length });
-    } catch (e) {
-      return sendJSON(res, 502, { error: e.message });
+      return sendJSON(res, 200, { ok: true, results });
     }
+    const targets = config.providers.filter(p => /^https?:/i.test(p.baseURL || ""));
+    const queue = targets.slice();
+    const results = [];
+    await Promise.all(Array.from({ length: Math.min(4, queue.length) }, async () => {
+      while (queue.length) { results.push(await runProvider(queue.shift())); }
+    }));
+    writeJSON(CONFIG_FILE, config);
+    rebuildModels();
+    return sendJSON(res, 200, { ok: true, scanned: targets.length, results });
   }
   if (url === "/hub/probe") {
     const targets = body.id ? [modelMap.get(body.id)] : models.filter(m => m.enabled);
@@ -1218,7 +1305,7 @@ async function handleControl(req, res, url) {
         const transport = u.protocol === "https:" ? https : http;
         const req = transport.request({
           method: "POST",
-          hostname: u.hostname,
+          hostname: u.hostname, port: u.port || undefined,
           path: u.pathname + (u.search || ""),
           headers: { "Content-Type": "application/json", "Authorization": m.key ? `Bearer ${m.key}` : "", "Content-Length": Buffer.byteLength(body) }
         }, (upRes) => {
@@ -1356,8 +1443,9 @@ const server = http.createServer(async (req, res) => {
         try { u = new URL(m.baseURL); } catch { markFail(m, "bad url"); attempt(); return; }
         const transport = u.protocol === "https:" ? https : http;
         const req = transport.request({
+          agent: upstreamAgent(u),
           method: "POST",
-          hostname: u.hostname,
+          hostname: u.hostname, port: u.port || undefined,
           path: u.pathname + (u.search || ""),
           headers: { "Content-Type": "application/json", "Authorization": m.key ? `Bearer ${m.key}` : "", "Content-Length": Buffer.byteLength(reqBody) }
         }, (upRes) => {
@@ -1572,7 +1660,7 @@ const server = http.createServer(async (req, res) => {
 // ---------------------------------------------------------------------------
 function cliProviders() {
   for (const p of config.providers) {
-    console.log(`[${p.name}] ${p.label} ${p.needsKey ? "(chiave: " + (p.authId || "sì") + ")" : "(keyless)"} ${p.baseURL}`);
+    console.log(`[${p.name}] ${p.label} ${p.needsKey ? "(chiave: " + (p.authId || "sÃ¬") + ")" : "(keyless)"} ${p.baseURL}`);
     for (const m of (p.models || [])) {
       const entry = modelMap.get(`${p.name}/${m.name}`);
       const enabled = !!(entry && entry.enabled);
@@ -1621,10 +1709,13 @@ async function probeOne(m) {
   const t0 = Date.now();
   const u = new URL(m.baseURL);
   const transport = u.protocol === "https:" ? https : http;
-  return new Promise((resolve) => {
+  await acquireSlot(m.provider);
+  try {
+    return await new Promise((resolve) => {
     const req = transport.request({
+      agent: upstreamAgent(u),
       method: "POST",
-      hostname: u.hostname,
+      hostname: u.hostname, port: u.port || undefined,
       path: u.pathname + (u.search || ""),
       headers: { "Content-Type": "application/json", "Authorization": m.key ? `Bearer ${m.key}` : "", "Content-Length": Buffer.byteLength(body) }
     }, (upRes) => {
@@ -1650,7 +1741,8 @@ async function probeOne(m) {
     req.setTimeout(15000, () => { req.destroy(new Error("timeout")); markFail(m, "timeout", null); resolve(); });
     req.write(body);
     req.end();
-  });
+    });
+  } finally { releaseSlot(m.provider); }
 }
 
 // ---------------------------------------------------------------------------
@@ -1711,6 +1803,11 @@ function startBackgroundProber() {
 
 function startHub() {
   rebuildModels();
+  if (authWasPlain && !ENV_PLAIN) {
+    writeAuth(auth);
+    authWasPlain = false;
+    log("auth.json migrated to encrypted format");
+  }
   const listen = () => {
     server.listen(PORT, "127.0.0.1", () => log(`ModelHub listening on ${PORT}`));
     startBackgroundProber();

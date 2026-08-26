@@ -3,6 +3,22 @@
 Tutte le modifiche rilevanti a ModelHub sono documentate qui.
 Il formato segue [Keep a Changelog](https://keepachangelog.com/) e il versioning segue [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-08-26
+
+### Added
+- Discovery dei cataloghi upstream: scansione singolo provider o batch su tutti (`POST /hub/discover`), con pulsante "Scansiona cataloghi" nel pannello web e riepilogo risultati.
+- Provider personalizzati: aggiunta/rimozione via API (`POST /hub/provider/add`, `POST /hub/provider/remove`) con auto-discovery del catalogo `/v1/models` e salvataggio chiave cifrata.
+- Ripristino configurazione (`POST /hub/import`): reimport di export completi (config, prefs, chiavi) mantenendo la porta locale.
+- Cifratura di `auth.json` (AES-256-GCM) con migrazione automatica al primo avvio; opt-out via `MODELHUB_AUTH_PLAIN=1`.
+- Endpoint metriche `GET /metrics` in formato Prometheus.
+- Test di failover end-to-end su `postWithFailover` con mock HTTP locale (failover HTTP 500, scarto contenuto vuoto, esaurimento candidati).
+
+### Changed
+- Connessioni keep-alive verso gli upstream (HTTP/HTTPS agents) e limiti di concorrenza per provider (default 4, env `MODELHUB_PROVIDER_CONCURRENCY`): eliminati i rate-limit da probe parallelo, discovery batch ~10x più rapida.
+
+### Fixed
+- Richieste verso upstream su porte non standard instradate alla porta 80 (opzione `port` mancante in tutte le chiamate `http.request`).
+
 ## [0.3.0] - 2026-08-26
 
 ### Added

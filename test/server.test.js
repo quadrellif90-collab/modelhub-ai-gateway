@@ -213,3 +213,76 @@ describe("routing strategies", () => {
     assert.strictEqual(cands[1], "p/exp");
   });
 });
+
+describe("postWithFailover", () => {
+  const http = require("node:http");
+  const mkModel = (id, baseURL) => ({
+    id, provider: "p", name: id, baseURL, key: "",
+    enabled: true, fails: 0, failUntil: 0, halfOpen: false, lastError: "",
+    lastLatencyMs: 0, requests: 0, tokens: 0, day: "", dailyReq: 0, dailyTok: 0,
+    cost: 0, dailyCost: 0, lifetimeFails: 0, lastTTFTMs: 0, avgTTFTMs: 0, free: true
+  });
+  const startServer = () => new Promise((resolve) => {
+    const srv = http.createServer((req, res) => {
+      if (req.url === "/bad") { res.writeHead(500); return res.end("boom"); }
+      if (req.url === "/empty") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ choices: [{ message: { content: "" } }] }));
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        choices: [{ message: { content: "ok" } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+      }));
+    });
+    srv.listen(0, "127.0.0.1", () => resolve(srv));
+  });
+
+  test("fails over from HTTP 500 upstream to next candidate", async () => {
+    const srv = await startServer();
+    const port = srv.address().port;
+    try {
+      mh.__setState({
+        models: [mkModel("p/bad", `http://127.0.0.1:${port}/bad`), mkModel("p/good", `http://127.0.0.1:${port}/good`)],
+        prefs: { enabled: {}, strategy: {}, profiles: { auto: ["p/bad", "p/good"] }, enhancer: { enabled: false } },
+        pricing: { providers: { p: { input: 1, output: 1 } }, models: {} }
+      });
+      const r = await mh.postWithFailover({ model: "auto", max_tokens: 8, messages: [{ role: "user", content: `failover probe ${Date.now()}` }] });
+      assert.strictEqual(r.ok, true);
+      assert.strictEqual(r.modelId, "p/good");
+      assert.deepStrictEqual(r.tried, ["p/bad", "p/good"]);
+      assert.strictEqual(r.data.choices[0].message.content, "ok");
+    } finally { srv.close(); }
+  });
+
+  test("skips empty-content responses during failover", async () => {
+    const srv = await startServer();
+    const port = srv.address().port;
+    try {
+      mh.__setState({
+        models: [mkModel("p/empty", `http://127.0.0.1:${port}/empty`), mkModel("p/good", `http://127.0.0.1:${port}/good`)],
+        prefs: { enabled: {}, strategy: {}, profiles: { auto: ["p/empty", "p/good"] }, enhancer: { enabled: false } },
+        pricing: { providers: { p: { input: 1, output: 1 } }, models: {} }
+      });
+      const r = await mh.postWithFailover({ model: "auto", max_tokens: 8, messages: [{ role: "user", content: `empty-content probe ${Date.now()}` }] });
+      assert.strictEqual(r.ok, true);
+      assert.strictEqual(r.modelId, "p/good");
+      assert.deepStrictEqual(r.tried, ["p/empty", "p/good"]);
+    } finally { srv.close(); }
+  });
+
+  test("reports failure when every candidate fails", async () => {
+    const srv = await startServer();
+    const port = srv.address().port;
+    try {
+      mh.__setState({
+        models: [mkModel("p/bad", `http://127.0.0.1:${port}/bad`)],
+        prefs: { enabled: {}, strategy: {}, profiles: { auto: ["p/bad"] }, enhancer: { enabled: false } },
+        pricing: { providers: { p: { input: 1, output: 1 } }, models: {} }
+      });
+      const r = await mh.postWithFailover({ model: "auto", max_tokens: 8, messages: [{ role: "user", content: `exhaustion probe ${Date.now()}` }] });
+      assert.strictEqual(r.ok, false);
+      assert.match(String(r.error), /p\/bad/);
+    } finally { srv.close(); }
+  });
+});

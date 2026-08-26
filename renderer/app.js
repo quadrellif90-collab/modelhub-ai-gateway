@@ -468,6 +468,24 @@ document.getElementById("np_add").onclick = async () => {
   poll();
 };
 
+document.getElementById("scanBtn").onclick = async () => {
+  const out = document.getElementById("scanOut");
+  const btn = document.getElementById("scanBtn");
+  btn.disabled = true;
+  out.textContent = "scansione in corso (può richiedere qualche minuto)...";
+  try {
+    const r = await api("/hub/discover", "POST", {});
+    if (!r.ok) throw new Error(r.error || "errore");
+    const lines = (r.results || []).map(x => `${x.provider}: +${x.added}${x.error ? ` (${x.error})` : ""}`);
+    out.textContent = lines.length ? lines.join("\n") : "nessun provider scansionabile";
+    poll();
+  } catch (e) {
+    out.textContent = "errore: " + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+};
+
 function esc(s) {
   return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
