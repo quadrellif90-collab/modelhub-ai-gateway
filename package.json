@@ -1,6 +1,6 @@
 {
   "name": "modelhub-ai-gateway",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "main": "main.js",
   "description": "Local multi-provider AI gateway: one OpenAI-compatible endpoint over 1300+ models with autorouting, prompt enhancement and realtime tray widget",

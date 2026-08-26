@@ -22,6 +22,19 @@ if (!CTRL_TOKEN) {
   try { CTRL_TOKEN = JSON.parse(fs.readFileSync(PREFS_PATH, "utf8")).controlToken || ""; } catch {}
 }
 
+process.on("uncaughtException", (e) => {
+  try {
+    fs.appendFileSync(path.join(require("node:os").tmpdir(), "modelhub.log"),
+      `[${new Date().toISOString()}] uncaughtException: ${(e && e.stack) || e}\n`);
+  } catch {}
+});
+process.on("unhandledRejection", (e) => {
+  try {
+    fs.appendFileSync(path.join(require("node:os").tmpdir(), "modelhub.log"),
+      `[${new Date().toISOString()}] unhandledRejection: ${(e && (e.stack || e.message)) || e}\n`);
+  } catch {}
+});
+
 // ensure a tray icon exists
 if (!fs.existsSync(ICON)) {
   const b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";

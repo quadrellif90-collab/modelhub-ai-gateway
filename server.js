@@ -55,7 +55,7 @@ const SIGNUP_URLS = {
   xai: "https://console.x.ai",
   zai: "https://z.ai/manage-apikey/apikey-list"
 };
-const VERSION = "0.6.0";
+const VERSION = "0.6.1";
 let cacheOn = process.env.MODELHUB_CACHE !== "0";
 let autoProbeOn = AUTO_PROBE;
 const UA_HTTP = new http.Agent({ keepAlive: true, maxSockets: 64 });
@@ -321,8 +321,17 @@ function catFirst(ids, pred) {
   return [...ids.filter(id => pred(classify(id))), ...ids.filter(id => !pred(classify(id)))];
 }
 
+const CHAT_BLOCK = /guard|safeguard|content-safety|prompt-guard|moderation|moderat|align|nemo-guard|reward|classif|detect|embed|rerank|vision-only|instruct-flash-(?!chat)|reasoning-guard|jailbreak|toxicity/i;
+function isChatModel(id) {
+  if (!id) return false;
+  if (CHAT_BLOCK.test(id)) return false;
+  const m = modelMap.get(id);
+  if (!m) return true;
+  return !CHAT_BLOCK.test(m.label || "") && !CHAT_BLOCK.test(m.name || "");
+}
+
 function rebuildProfiles() {
-  const enabledIds = models.filter(m => m.enabled).map(m => m.id);
+  const enabledIds = models.filter(m => m.enabled && isChatModel(m.id)).map(m => m.id);
   const scored = enabledIds.slice().sort((a, b) => autorouteScore(b) - autorouteScore(a));
   prefs.profiles.auto = scored;
   prefs.profiles["auto-code"] = catFirst(scored, c => c.code);
@@ -342,7 +351,7 @@ function rebuildProfiles() {
 }
 
 function buildFreePool() {
-  return models.filter(m => m.enabled && m.free)
+  return models.filter(m => m.enabled && m.free && isChatModel(m.id))
     .map(m => m.id)
     .sort((a, b) => autorouteScore(b) - autorouteScore(a));
 }
@@ -466,6 +475,7 @@ function enhancerCfg() {
 }
 async function maybeEnhance(body, req) {
   const cfg = enhancerCfg();
+  let em = null;
   try {
     if (!cfg.enabled || !cfg.model) return;
     if (req && req.headers["x-modelhub-no-enhance"]) return;
@@ -476,8 +486,15 @@ async function maybeEnhance(body, req) {
     if (!last || typeof last.content !== "string") return;
     const original = last.content.trim();
     if (original.length < 16 || original.length > cfg.maxChars) return;
-    const em = modelMap.get(cfg.model);
-    if (!em || !em.enabled) return;
+    em = modelMap.get(cfg.model);
+    if (!em || !em.enabled) {
+      const altId = (prefs.profiles["free-pool"] || []).find(id => {
+        const x = modelMap.get(id);
+        return x && x.enabled && x.free && (!x.failUntil || x.failUntil <= Date.now());
+      });
+      em = altId ? modelMap.get(altId) : null;
+    }
+    if (!em) return;
     const hash = crypto.createHash("sha1").update(original).digest("hex");
     const hit = enhanceCache.get(hash);
     let enhanced = hit && Date.now() - hit.ts < 3600000 ? hit.enhanced : null;
@@ -503,14 +520,14 @@ async function maybeEnhance(body, req) {
       out = out.replace(/^```[^\n]*\n?/, "").replace(/```\s*$/, "").trim();
       if (!out || out.length < 8) throw new Error("empty enhancement");
       enhanced = out;
-      recordRequest({ proto: "enhance", reqModel: body.model, model: cfg.model, ok: true, error: "", latencyMs: r.latencyMs || 0, ttftMs: null, promptTok: r.promptTok || 0, completionTok: r.completionTok || 0, totalTok: r.totalTok || 0, cost: computeCost(em, r.promptTok || 0, r.completionTok || 0), cached: false });
+      recordRequest({ proto: "enhance", reqModel: body.model, model: em.id, ok: true, error: "", latencyMs: r.latencyMs || 0, ttftMs: null, promptTok: r.promptTok || 0, completionTok: r.completionTok || 0, totalTok: r.totalTok || 0, cost: computeCost(em, r.promptTok || 0, r.completionTok || 0), cached: false });
       if (enhanceCache.size > 500) enhanceCache.clear();
       enhanceCache.set(hash, { ts: Date.now(), enhanced });
     }
     last.originalContent = last.content;
     last.content = enhanced;
   } catch (e) {
-    recordRequest({ proto: "enhance", reqModel: body && body.model, model: cfg.model, ok: false, error: String((e && e.message) || e).slice(0, 120), latencyMs: 0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
+    recordRequest({ proto: "enhance", reqModel: body && body.model, model: (em && em.id) || cfg.model || "", ok: false, error: String((e && e.message) || e).slice(0, 120), latencyMs: 0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
   }
 }
 function cascadeValid(data) {
@@ -531,9 +548,9 @@ function selectCandidates(modelId, profile) {
   const now = Date.now();
   const healthy = order.filter(id => {
     const m = modelMap.get(id);
-    return m && m.enabled && (!m.failUntil || m.failUntil <= now);
+    return m && m.enabled && isChatModel(id) && (!m.failUntil || m.failUntil <= now);
   });
-  const pool = applyStrategy(healthy.length ? healthy : order.filter(id => modelMap.has(id) && modelMap.get(id).enabled), strategyFor(profile));
+  const pool = applyStrategy(healthy.length ? healthy : order.filter(id => { const m = modelMap.get(id); return m && m.enabled && isChatModel(id); }), strategyFor(profile));
   return pool;
 }
 
@@ -583,7 +600,7 @@ async function postNonStreaming(m, openaiBody) {
           const ra = parseRetryAfter(upRes, b);
           const code = upRes.statusCode;
           if (code === 429) markFail(m, `HTTP 429`, ra || null);
-          else if (/402|403/.test(String(code))) { m.free = false; markFail(m, `HTTP ${code} (paid)`, null); }
+          else if (/402|403/.test(String(code))) { m.free = false; m.enabled = false; markFail(m, `HTTP ${code} (paid)`, null); }
           else if (code === 401) markFail(m, `HTTP 401 (key?)`, null);
           else markFail(m, `HTTP ${code} ${b.slice(0, 120)}`, null);
           resolve({ ok: false, error: `HTTP ${code}`, httpCode: code });
@@ -1064,7 +1081,7 @@ function controlState() {
     profileOrder: prefs.profiles,
     strategies: prefs.strategy,
     enhancer: enhancerCfg(),
-    leaderboard: models.filter(m => m.enabled).map(m => ({
+    leaderboard: models.filter(m => m.enabled && isChatModel(m.id)).map(m => ({
       id: m.id, free: m.free,
       healthy: !m.failUntil || m.failUntil <= Date.now(),
       verified: !!m.verified, lastVerifiedAt: m.lastVerifiedAt || 0,
@@ -1472,17 +1489,25 @@ const server = http.createServer(async (req, res) => {
       const candidates = selectCandidates(parsed.model, profile);
       const chainStart = Date.now();
       const CHAIN_BUDGET = settingsCfg().failoverMs;
+      let clientStarted = false;
+      let chainClosed = false;
+      let gen = 0;
+      const safeEnd = () => { if (!chainClosed) { chainClosed = true; try { res.end(); } catch {} } };
+      const terminal = (code, obj) => {
+        if (clientStarted || chainClosed) { safeEnd(); return; }
+        chainClosed = true;
+        try { res.writeHead(code, { "Content-Type": "application/json" }); res.end(JSON.stringify(obj)); } catch {}
+      };
       const attempt = () => {
+        if (clientStarted || chainClosed) { safeEnd(); return; }
         if (!candidates.length) {
           recordRequest({ proto: "stream:openai", reqModel: parsed.model, model: null, ok: false, error: "all upstreams failed", latencyMs: 0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
-          res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "no candidates" }));
+          terminal(502, { error: "no candidates" });
           return;
         }
         if (Date.now() - chainStart > CHAIN_BUDGET) {
           recordRequest({ proto: "stream:openai", reqModel: parsed.model, model: null, ok: false, error: "failover budget exhausted", latencyMs: Date.now() - chainStart, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
-          res.writeHead(502, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "failover timeout" }));
+          terminal(502, { error: "failover timeout" });
           return;
         }
         const peekId = candidates[0];
@@ -1496,7 +1521,10 @@ const server = http.createServer(async (req, res) => {
         const giveOnce = () => { if (!srel) { srel = true; streamSlotGive(m.provider); } };
         const reqBody = JSON.stringify({ ...parsed, model: m.name, stream: true });
         const t0 = Date.now();
-        let clientStarted = false;
+        gen++;
+        const myGen = gen;
+        const stale = () => myGen !== gen;
+        let ffailed = false;
         let u;
         try { u = new URL(m.baseURL); } catch { markFail(m, "bad url"); attempt(); return; }
         const transport = u.protocol === "https:" ? https : http;
@@ -1519,8 +1547,9 @@ const server = http.createServer(async (req, res) => {
               else if (code === 401) markFail(m, `HTTP 401 (key?)`, null);
               else markFail(m, `HTTP ${code} ${b.slice(0, 120)}`, null);
               recordRequest({ proto: "stream:openai", reqModel: parsed.model, model: id, ok: false, error: `HTTP ${code}`, latencyMs: Date.now() - t0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
+              if (clientStarted || chainClosed) safeEnd();
+              else attempt();
             });
-            attempt();
             return;
           }
           const latencyMs = Date.now() - t0;
@@ -1529,42 +1558,68 @@ const server = http.createServer(async (req, res) => {
           m.lastLatencyMs = latencyMs;
           const pt = new PassThrough();
           upRes.pipe(pt);
+          let held = [];
+          let heldBytes = 0;
+          let saw = false;
           let firstAt = null;
+          const failEmpty = (why) => {
+            giveOnce();
+            if (ffailed || stale() || clientStarted || chainClosed) return;
+            ffailed = true;
+            markFail(m, why, null);
+            recordRequest({ proto: "stream:openai", reqModel: parsed.model, model: id, ok: false, error: why, latencyMs: Date.now() - t0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
+            attempt();
+          };
           pt.on("data", c => {
+            captureUsage(c, m);
+            if (!saw) {
+              const txt = c.toString("utf8");
+              if (/\"content\"\s*:\s*\"(?:\\.|[^\"\\])+/.test(txt) || /\"tool_calls\"/.test(txt)) {
+                saw = true;
+              } else if (/\"finish_reason\"\s*:\s*\"/.test(txt)) {
+                try { upRes.destroy(); } catch {}
+                return failEmpty("empty stream (no content)");
+              } else {
+                held.push(c);
+                heldBytes += c.length;
+                const holdMs = Math.min(UPSTREAM_TIMEOUT_MS, parseInt(process.env.MODELHUB_STREAM_HOLD_MS || "8000", 10));
+                if (heldBytes > 65536 || Date.now() - t0 > holdMs) {
+                  try { upRes.destroy(); } catch {}
+                  return failEmpty("empty stream (hold limit)");
+                }
+                return;
+              }
+            }
             if (!clientStarted) {
               clientStarted = true;
-              res.writeHead(upRes.statusCode, upRes.headers);
-            }
-            if (firstAt == null) {
               firstAt = Date.now();
               const ttft = firstAt - t0;
               m.lastTTFTMs = ttft;
               m.avgTTFTMs = m.avgTTFTMs ? Math.round((m.avgTTFTMs * 3 + ttft) / 4) : ttft;
+              try { res.writeHead(upRes.statusCode, upRes.headers); } catch {}
+              for (const h of held) res.write(h);
+              held = [];
             }
-            captureUsage(c, m);
             res.write(c);
           });
           pt.on("end", () => {
             giveOnce();
-            if (!clientStarted) {
-              markFail(m, "empty stream", null);
-              recordRequest({ proto: "stream:openai", reqModel: parsed.model, model: id, ok: false, error: "empty stream", latencyMs: Date.now() - t0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
-              attempt();
-              return;
-            }
+            if (stale()) return;
+            if (!clientStarted) { failEmpty("empty stream"); return; }
             recordRequest({
               proto: "stream:openai", reqModel: parsed.model, model: id, ok: true, error: "",
               latencyMs: Date.now() - t0, ttftMs: firstAt ? firstAt - t0 : null,
               promptTok: 0, completionTok: 0, totalTok: 0, cost: null, cached: false
             });
-            res.end();
+            safeEnd();
           });
-          pt.on("close", () => giveOnce());
+          pt.on("close", () => { giveOnce(); if (!stale() && clientStarted && !chainClosed) safeEnd(); });
           return;
         });
         req.on("error", (e) => {
           giveOnce();
-          if (clientStarted) { try { res.end(); } catch {} return; }
+          if (stale()) return;
+          if (clientStarted || chainClosed) { safeEnd(); return; }
           markFail(m, e.message, null);
           recordRequest({ proto: "stream:openai", reqModel: parsed.model, model: id, ok: false, error: String(e.message || e).slice(0, 120), latencyMs: Date.now() - t0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
           attempt();
@@ -1572,12 +1627,11 @@ const server = http.createServer(async (req, res) => {
         req.setTimeout(UPSTREAM_TIMEOUT_MS, () => {
           giveOnce();
           req.destroy(new Error("timeout"));
-          if (clientStarted) { try { res.end(); } catch {} }
-          else {
-            markFail(m, "timeout", null);
-            recordRequest({ proto: "stream:openai", reqModel: parsed.model, model: id, ok: false, error: "timeout", latencyMs: Date.now() - t0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
-            attempt();
-          }
+          if (stale()) return;
+          if (clientStarted || chainClosed) { safeEnd(); return; }
+          markFail(m, "timeout", null);
+          recordRequest({ proto: "stream:openai", reqModel: parsed.model, model: id, ok: false, error: "timeout", latencyMs: Date.now() - t0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
+          attempt();
         });
         req.write(reqBody);
         req.end();
@@ -1763,16 +1817,25 @@ async function probeAll(targets) {
   if (!targets || !targets.length) {
     targets = models.filter(m => m.enabled);
   }
-  const promises = targets.map(m => probeOne(m));
+  const promises = targets.map(m => probeOne(m, true));
   await Promise.allSettled(promises);
   rebuildProfiles();
 }
-async function probeOne(m) {
+async function probeOne(m, gentle = false) {
   const body = JSON.stringify({ model: m.name, messages: [{ role: "user", content: "ping" }], max_tokens: 1, stream: false });
   const t0 = Date.now();
   const u = new URL(m.baseURL);
   const transport = u.protocol === "https:" ? https : http;
   await acquireSlot(m.provider);
+  const softFail = (msg) => {
+    if (gentle) {
+      m.lastFailAt = Date.now();
+      m.failUntil = Date.now() + 120000;
+      m.lastError = String(msg).slice(0, 200);
+    } else {
+      markFail(m, String(msg).slice(0, 200), null);
+    }
+  };
   try {
     return await new Promise((resolve) => {
     const req = transport.request({
@@ -1788,10 +1851,10 @@ async function probeOne(m) {
         upRes.on("end", () => {
           const ra = parseRetryAfter(upRes, b);
           const code = upRes.statusCode;
-          if (code === 429) markFail(m, `HTTP 429`, ra || null);
-          else if (/402|403/.test(String(code))) { m.free = false; m.enabled = false; markFail(m, `HTTP ${code} (paid)`, null); }
-          else if (code === 401) markFail(m, `HTTP 401 (key?)`, null);
-          else markFail(m, `HTTP ${code} ${b.slice(0, 120)}`, null);
+          if (code === 429) softFail(`HTTP 429`);
+          else if (/402|403/.test(String(code))) { m.free = false; m.enabled = false; softFail(`HTTP ${code} (paid)`); }
+          else if (code === 401) softFail(`HTTP 401 (key?)`);
+          else softFail(`HTTP ${code} ${b.slice(0, 120)}`);
           m.lastVerifiedAt = Date.now();
           m.verified = false;
         });
@@ -1804,8 +1867,8 @@ async function probeOne(m) {
       }
       resolve();
     });
-    req.on("error", e => { markFail(m, e.message, null); m.lastVerifiedAt = Date.now(); m.verified = false; resolve(); });
-    req.setTimeout(UPSTREAM_TIMEOUT_NONSTREAM_MS, () => { req.destroy(new Error("timeout")); markFail(m, "timeout", null); m.lastVerifiedAt = Date.now(); m.verified = false; resolve(); });
+    req.on("error", e => { softFail(e.message); m.lastVerifiedAt = Date.now(); m.verified = false; resolve(); });
+    req.setTimeout(UPSTREAM_TIMEOUT_NONSTREAM_MS, () => { req.destroy(new Error("timeout")); softFail("timeout"); m.lastVerifiedAt = Date.now(); m.verified = false; resolve(); });
     req.write(body);
     req.end();
     });
@@ -1823,7 +1886,7 @@ async function verifyHeads() {
       const arr = prefs.profiles[prof] || [];
       for (const id of arr.slice(0, K)) {
         const m = modelMap.get(id);
-        if (m && m.enabled && !ids.includes(id)) ids.push(id);
+        if (m && m.enabled && isChatModel(id) && !ids.includes(id)) ids.push(id);
       }
     }
     const pool = Math.max(2, PROV_CONCURRENCY);
@@ -1833,7 +1896,7 @@ async function verifyHeads() {
         const m = modelMap.get(ids[i++]);
         if (!m) continue;
         m.halfOpen = true;
-        try { await probeOne(m); } finally { m.halfOpen = false; }
+        try { await probeOne(m, true); } finally { m.halfOpen = false; }
       }
     }));
     rebuildProfiles();

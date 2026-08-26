@@ -3,6 +3,16 @@
 Tutte le modifiche rilevanti a ModelHub sono documentate qui.
 Il formato segue [Keep a Changelog](https://keepachangelog.com/) e il versioning segue [Semantic Versioning](https://semver.org/).
 
+## [0.6.1] - 2026-08-26
+
+### Fixed
+- Crash `ERR_HTTP_HEADERS_SENT` nell'handler streaming OpenAI: i flag di stato erano per-tentativo invece che per-catena → riscrittura con pattern a "generazioni" (solo la generazione corrente può scrivere/chiudere la risposta client) e handler globali `process.on("uncaughtException")`/`unhandledRejection` in `main.js` (l'app non muore più per bug di un handler).
+- Streaming vuoto: gli upstream che rispondono SSE senza contenuto (deltas solo-ruolo/reasoning) vengono scartati con failover silenzioso PRIMA del primo byte verso il client (hold-back buffer).
+- Degrado di salute da "probe storm": i ping di verifica/probe ora sono *gentle* (cooldown corto senza inflare i fallimenti), così non avvelenano l'autorouteScore; i modelli non-chat (guard/safeguard/content-safety/moderation/embed/rerank...) sono esclusi da profili, candidati e leaderboard via `isChatModel()`.
+
+### Changed
+- Finestra di hold per stream vuoto accorciata a `min(UPSTREAM_TIMEOUT_MS, MODELHUB_STREAM_HOLD_MS)` (default 8000ms) per permettere più tentativi nel budget di failover.
+
 ## [0.6.0] - 2026-08-26
 
 ### Added
