@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.log
+*.log.jsonl
+logs/
+auth.json
+prefs.local.json
+modelhub-export-*.json
+.DS_Store
+Thumbs.db

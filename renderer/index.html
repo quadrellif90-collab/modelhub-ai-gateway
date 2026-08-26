@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ModelHub</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">ModelHub <span class="sub">aggregatore locale multi-provider</span></div>
+    <div id="costBadge" class="badge cost" title="Spesa di oggi / totale">–</div>
+    <div class="status">
+      <span id="serverDot" class="dot off"></span>
+      <span id="serverText">server…</span>
+    </div>
+    <div class="actions">
+      <button id="exportBtn" class="btn" title="Esporta config completa (incluse API keys)">Export</button>
+      <button id="themeBtn" class="btn" title="Cambia tema">Tema</button>
+      <button id="probeAll" class="btn">Probe all</button>
+      <button id="refresh" class="btn">Aggiorna</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="col providers">
+      <h2>Provider &amp; modelli <span id="modelCount" class="count"></span></h2>
+      <div class="ptoolbar">
+        <input id="pSearch" type="search" placeholder="cerca provider o modello…" />
+        <select id="pFilter" title="Filtro modelli">
+          <option value="all">tutti i modelli</option>
+          <option value="enabled">solo attivi</option>
+          <option value="disabled">solo disattivi</option>
+          <option value="free">solo free</option>
+        </select>
+        <select id="pSort" title="Ordinamento">
+          <option value="default">ordine default</option>
+          <option value="name">nome A→Z</option>
+          <option value="health">salute prima</option>
+          <option value="usage">più usati</option>
+        </select>
+        <label class="check compact"><input id="pCompact" type="checkbox" /> compatta</label>
+      </div>
+      <div id="providers"></div>
+    </section>
+
+    <aside class="col side">
+      <section class="panel">
+        <h2>Profili &amp; ordinamento</h2>
+        <div class="row">
+          <select id="profileSelect"></select>
+        </div>
+        <div class="row">
+          <select id="strategySelect" title="Strategia di routing"></select>
+        </div>
+        <p class="hint">Strategie: order = lista manuale · cheapest = prezzo · fastest = TTFT medio · least-used = carico giornaliero · random · cascade = cheap→strong con validazione.</p>
+        <div class="row">
+          <button id="profileNew" class="btn">+ Profilo</button>
+          <button id="profileDel" class="btn danger">Elimina</button>
+        </div>
+        <p class="hint">Trascina per riordinare. Le app collegate usano il profilo come <code>model</code>.</p>
+        <ol id="profileList" class="profile-list"></ol>
+        <button id="saveOrder" class="btn primary">Salva ordine</button>
+      </section>
+
+      <section class="panel">
+        <h2>Prezzi ($/Mtok)</h2>
+        <p class="hint">Default per provider; override per modello in <code>pricing.json</code>. I modelli free costano sempre 0.</p>
+        <div id="pricingList" class="pricing-list"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Chiavi gateway</h2>
+        <p class="hint">Se definite, le API di inferenza richiedono <code>Authorization: Bearer &lt;key&gt;</code> o <code>x-api-key</code>. Una per riga, vuoto = nessuna protezione.</p>
+        <textarea id="gwKeys" placeholder="mh-key-1&#10;mh-key-2"></textarea>
+        <button id="gwSave" class="btn primary">Salva chiavi</button>
+      </section>
+
+      <section class="panel">
+        <h2>Prompt enhancer</h2>
+        <div class="row">
+          <select id="enhModel"></select>
+        </div>
+        <p class="hint">Migliora automaticamente l'ultimo messaggio utente prima del routing. Salta richieste con tool calls.</p>
+      </section>
+
+      <section class="panel">
+        <h2>Funzionalità</h2>
+        <label class="check"><input id="featEnhancer" type="checkbox" /> prompt enhancer</label>
+        <label class="check"><input id="featCache" type="checkbox" /> cache risposte</label>
+        <label class="check"><input id="featProbe" type="checkbox" /> probe automatico</label>
+        <div id="cacheInfo" class="hint">–</div>
+        <button id="cacheClear" class="btn">Svuota cache</button>
+      </section>
+
+      <section class="panel">
+        <h2>Aggiungi provider</h2>
+        <div class="form">
+          <input id="np_name" placeholder="nome (es. openai)" />
+          <input id="np_label" placeholder="etichetta" />
+          <input id="np_base" placeholder="baseURL chat/completions" />
+          <label class="check"><input id="np_key" type="checkbox" /> richiede API key</label>
+          <textarea id="np_models" placeholder="modelli, uno per riga: nome|free (es. gpt-4o|false)&#10;vuoto = auto-discovery se disponibile"></textarea>
+          <button id="np_add" class="btn primary">Aggiungi (+discovery)</button>
+        </div>
+      </section>
+    </aside>
+
+    <section class="activity">
+      <div class="panel wide">
+        <h2>Classifica autoroute <span class="count">top 30 · punteggio dinamico</span></h2>
+        <ol id="leaderboard" class="lb"></ol>
+      </div>
+      <div class="panel wide">
+        <h2>Richieste recenti</h2>
+        <div id="chart24" class="chart"></div>
+        <table class="logs">
+          <thead>
+            <tr><th>ora</th><th>modello richiesto</th><th>usato</th><th>proto</th><th>ms</th><th>ttft</th><th>tok</th><th>$</th><th></th></tr>
+          </thead>
+          <tbody id="logRows"><tr><td colspan="9" class="hint">nessuna richiesta</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

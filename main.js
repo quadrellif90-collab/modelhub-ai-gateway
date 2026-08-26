@@ -1,0 +1,128 @@
+const { app, BrowserWindow, Tray, Menu, nativeImage, shell } = require("electron");
+const path = require("node:path");
+const fs = require("node:fs");
+
+const DIR = __dirname;
+const ICON = path.join(DIR, "icon.png");
+const SERVER_PORT = 8787;
+
+// In packaged mode, read/write the user's real installation folder
+// (C:\Users\<user>\.config\opencode\modelhub) so existing config/auth/prefs
+// and free/free-tier models persist. In source mode DIR is already that folder.
+if (app.isPackaged) {
+  const installDir = path.join(
+    process.env.USERPROFILE || app.getPath("home"),
+    ".config", "opencode", "modelhub"
+  );
+  if (fs.existsSync(installDir)) process.env.MODELHUB_DIR = installDir;
+}
+
+// ensure a tray icon exists
+if (!fs.existsSync(ICON)) {
+  const b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+  fs.writeFileSync(ICON, Buffer.from(b64, "base64"));
+}
+
+let win = null;
+let tray = null;
+let widget = null;
+
+function startServer() {
+  try {
+    const hub = require(path.join(DIR, "server.js"));
+    if (typeof hub.startHub === "function") hub.startHub();
+  } catch (e) {
+    console.error("hub start failed:", e);
+  }
+}
+
+function createWidget() {
+  widget = new BrowserWindow({
+    width: 360, height: 300, show: false, frame: false,
+    alwaysOnTop: true, skipTaskbar: true, resizable: false,
+    icon: ICON,
+    webPreferences: { nodeIntegration: false, contextIsolation: true }
+  });
+  widget.loadFile(path.join(DIR, "renderer", "widget.html"));
+  widget.on("closed", () => { widget = null; });
+}
+
+function toggleWidget() {
+  if (!widget) createWidget();
+  if (widget.isVisible()) { widget.hide(); return; }
+  try {
+    const tb = tray.getBounds();
+    const { screen } = require("electron");
+    const wa = screen.getDisplayNearestPoint({ x: tb.x, y: tb.y }).workArea;
+    let x = tb.x - 370;
+    let y = Math.min(tb.y + tb.height + 6, wa.y + wa.height - 310);
+    if (x < wa.x) x = wa.x + 8;
+    widget.setPosition(x, y, false);
+  } catch {}
+  widget.show();
+}
+
+function showWindow() {
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+function quitApp() {
+  app.quit();
+}
+
+function setAutoStart(on) {
+  app.setLoginItemSettings({ openAtLogin: on, path: process.execPath, args: [app.getAppPath()] });
+}
+
+function createWindow() {
+  win = new BrowserWindow({
+    width: 1180, height: 760, show: false,
+    icon: ICON,
+    webPreferences: { nodeIntegration: false, contextIsolation: true }
+  });
+  win.loadFile(path.join(DIR, "renderer", "index.html"));
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { action: "deny" };
+  });
+  win.on("close", (e) => { e.preventDefault(); win.hide(); });
+}
+
+function createTray() {
+  const img = nativeImage.createFromPath(ICON).resize({ width: 16, height: 16 });
+  tray = new Tray(img);
+  tray.setToolTip("ModelHub - aggregator locale");
+  const template = [
+    { label: "Apri pannello", click: () => showWindow() },
+    { label: "Widget realtime", click: () => toggleWidget() },
+    {
+      label: "Avvio automatico a login",
+      type: "checkbox",
+      checked: app.getLoginItemSettings().openAtLogin,
+      click: (mi) => setAutoStart(mi.checked)
+    },
+    { type: "separator" },
+    { label: "Esci (ferma server)", click: () => quitApp() }
+  ];
+  tray.setContextMenu(Menu.buildFromTemplate(template));
+  tray.on("click", () => toggleWidget());
+}
+
+// single instance: avoid two servers
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) { app.quit(); }
+app.on("second-instance", () => showWindow());
+
+app.whenReady().then(() => {
+  startServer();
+  createWindow();
+  createTray();
+  createWidget();
+  const launchedAtLogin = app.getLoginItemSettings().wasOpenedAtLogin;
+  if (!launchedAtLogin) setTimeout(showWindow, 600);
+});
+
+app.on("window-all-closed", (e) => { e.preventDefault(); });

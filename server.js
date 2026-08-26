@@ -1,0 +1,1747 @@
+const http = require("node:http");
+const https = require("node:https");
+const fs = require("node:fs");
+const path = require("node:path");
+const os = require("node:os");
+const crypto = require("node:crypto");
+const { PassThrough } = require("node:stream");
+
+const PORT = parseInt(process.env.MODELHUB_PORT || "8787", 10);
+const DIR = process.env.MODELHUB_DIR || __dirname;
+const CONFIG_FILE = path.join(DIR, "config.json");
+const AUTH_FILE = path.join(DIR, "auth.json");
+const PREFS_FILE = path.join(DIR, "prefs.json");
+const LOG_FILE = path.join(os.tmpdir(), "modelhub.log");
+const DEFAULT_PROFILES = ["auto", "auto-code", "auto-reasoning", "auto-fast", "free-pool"];
+const AUTO_PROBE = process.env.MODELHUB_AUTO_PROBE !== "0";
+const ENV_PLAIN = process.env.MODELHUB_AUTH_PLAIN === "1" || process.env.MODELHUB_AUTH_PLAIN === "true";
+const AUTH_KEY_ENV = process.env.MODELHUB_AUTH_KEY;
+const CONTROL_TOKEN = process.env.MODELHUB_TOKEN || "";
+const REQUEST_LOG_FILE = path.join(DIR, "requests.log.jsonl");
+const PRICING_FILE = path.join(DIR, "pricing.json");
+const CACHE_ENABLED = process.env.MODELHUB_CACHE !== "0";
+const CACHE_TTL_MS = parseInt(process.env.MODELHUB_CACHE_TTL || "600000", 10);
+const CACHE_MAX = parseInt(process.env.MODELHUB_CACHE_MAX || "200", 10);
+const UPSTREAM_TIMEOUT_MS = parseInt(process.env.MODELHUB_UPSTREAM_TIMEOUT || "15000", 10);
+const UPSTREAM_TIMEOUT_NONSTREAM_MS = parseInt(process.env.MODELHUB_UPSTREAM_TIMEOUT_NONSTREAM || "30000", 10);
+const STRATEGIES = ["order", "autoroute", "cheapest", "fastest", "least-used", "random", "cascade"];
+const SIGNUP_URLS = {
+  upstage: "https://console.upstage.ai/keys",
+  nvidia: "https://build.nvidia.com/settings/api-keys",
+  minimax: "https://platform.minimax.io/user-center/basic-information/interface-key",
+  alibaba: "https://modelstudio.console.alibabacloud.com/?apiKey=1",
+  kilocode: "https://app.kilocode.ai/settings/keys",
+  fireworks: "https://fireworks.ai/account/api-keys",
+  cerebras: "https://cloud.cerebras.ai",
+  mistral: "https://console.mistral.ai/api-keys",
+  openai: "https://platform.openai.com/api-keys",
+  deepseek: "https://platform.deepseek.com/api_keys",
+  groq: "https://console.groq.com/keys",
+  google: "https://aistudio.google.com/app/apikey",
+  openrouter: "https://openrouter.ai/settings/keys",
+  chutes: "https://chutes.ai/app",
+  cohere: "https://dashboard.cohere.com/api-keys",
+  huggingface: "https://huggingface.co/settings/tokens",
+  github: "https://github.com/settings/personal-access-tokens/new",
+  together: "https://api.together.xyz/settings/api-keys",
+  nebius: "https://studio.nebius.ai/settings/api-keys",
+  siliconflow: "https://cloud.siliconflow.cn/account/ak",
+  ai21: "https://studio.ai21.com/account/security-api-keys",
+  cloudflare: "https://dash.cloudflare.com/profile/api-tokens",
+  ovhcloud: "https://www.ovh.com/auth/api-create-token/",
+  modelscope: "https://modelscope.cn/my/myaccesstoken",
+  sambanova: "https://cloud.sambanova.ai/apis",
+  novita: "https://novita.ai/dashboard/key",
+  perplexity: "https://www.perplexity.ai/settings/api",
+  xai: "https://console.x.ai",
+  zai: "https://z.ai/manage-apikey/apikey-list"
+};
+const VERSION = "0.3.0";
+let cacheOn = process.env.MODELHUB_CACHE !== "0";
+let autoProbeOn = AUTO_PROBE;
+
+// ---------------------------------------------------------------------------
+// crittografia chiavi (AES-256-GCM, key derivata dalla macchina)
+// ---------------------------------------------------------------------------
+function deriveAuthKey() {
+  const src = AUTH_KEY_ENV || `${os.hostname() || ""}:${os.userInfo().username || ""}:modelhub-v1`;
+  return crypto.createHash("sha256").update(src).digest();
+}
+function encryptAuth(obj) {
+  const key = deriveAuthKey();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const json = JSON.stringify(obj);
+  const enc = Buffer.concat([cipher.update(json, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return { v: 1, iv: iv.toString("base64"), tag: tag.toString("base64"), cipher: enc.toString("base64") };
+}
+function decryptAuth(w) {
+  const key = deriveAuthKey();
+  const iv = Buffer.from(w.iv, "base64");
+  const tag = Buffer.from(w.tag, "base64");
+  const enc = Buffer.from(w.cipher, "base64");
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAuthTag(tag);
+  const json = Buffer.concat([decipher.update(enc), decipher.final()]);
+  return JSON.parse(json.toString("utf8"));
+}
+function looksLikeAuth(obj) {
+  if (!obj || typeof obj !== "object") return false;
+  for (const k of Object.keys(obj)) {
+    const v = obj[k];
+    if (typeof v === "string") return true;
+    if (v && typeof v === "object" && typeof v.key === "string") return true;
+    if (v && typeof v === "object" && v.v === 1 && v.iv && v.cipher) return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// logging
+// ---------------------------------------------------------------------------
+function log(m) {
+  const line = `[${new Date().toISOString()}] ${m}\n`;
+  try { fs.appendFileSync(LOG_FILE, line); } catch {}
+}
+
+// ---------------------------------------------------------------------------
+// storage
+// ---------------------------------------------------------------------------
+function readJSON(file, fallback) {
+  try {
+    const raw = fs.readFileSync(file, "utf8");
+    return JSON.parse(raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw);
+  } catch { return fallback; }
+}
+function writeJSON(file, obj) {
+  try { fs.writeFileSync(file, JSON.stringify(obj, null, 2)); } catch (e) { log("write err " + file + ": " + e.message); }
+}
+function readAuth() {
+  try {
+    const raw = fs.readFileSync(AUTH_FILE, "utf8");
+    let obj = null;
+    try { obj = JSON.parse(raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw); } catch { obj = null; }
+    if (looksLikeAuth(obj)) return obj;
+    if (obj && typeof obj === "object" && obj.v === 1 && obj.iv && obj.cipher) {
+      try { return decryptAuth(obj); } catch { return {}; }
+    }
+    return {};
+  } catch { return {}; }
+}
+function writeAuth(obj) {
+  if (ENV_PLAIN) { writeJSON(AUTH_FILE, obj); return; }
+  writeJSON(AUTH_FILE, encryptAuth(obj));
+}
+
+// ---------------------------------------------------------------------------
+// config/auth/prefs caricati
+// ---------------------------------------------------------------------------
+let config = readJSON(CONFIG_FILE, null);
+if (!config || !Array.isArray(config.providers)) {
+  config = { port: PORT, providers: [] };
+  log("WARN: config.json missing/invalid, starting with empty providers");
+}
+if (!config.port) config.port = PORT;
+
+let auth = readAuth();
+let prefs = readJSON(PREFS_FILE, {});
+if (!prefs.enabled) prefs.enabled = {};
+if (!prefs.profiles) prefs.profiles = {};
+if (!prefs.strategy || typeof prefs.strategy !== "object") prefs.strategy = {};
+if (!Array.isArray(prefs.gatewayKeys)) prefs.gatewayKeys = [];
+
+// ---------------------------------------------------------------------------
+// pricing (USD per milione di token)
+// ---------------------------------------------------------------------------
+const DEFAULT_PRICING = {
+  openai: { input: 2.5, output: 10 },
+  anthropic: { input: 3, output: 15 },
+  google: { input: 1.25, output: 5 },
+  groq: { input: 0.59, output: 0.79 },
+  deepseek: { input: 0.27, output: 1.1 },
+  mistral: { input: 2, output: 6 },
+  xai: { input: 3, output: 15 },
+  cerebras: { input: 0.6, output: 0.6 },
+  together: { input: 0.6, output: 0.6 },
+  nvidia: { input: 0, output: 0 },
+  ollama: { input: 0, output: 0 }
+};
+let pricing = readJSON(PRICING_FILE, null);
+if (!pricing || typeof pricing !== "object" || !pricing.providers) {
+  pricing = { currency: "USD", providers: { ...DEFAULT_PRICING }, models: {} };
+  writeJSON(PRICING_FILE, pricing);
+}
+
+function priceFor(provider, modelName) {
+  const mk = `${provider}/${modelName}`;
+  const mo = pricing.models && pricing.models[mk];
+  if (mo && typeof mo.input === "number" && typeof mo.output === "number") return mo;
+  const po = (pricing.providers && pricing.providers[provider]) || {};
+  return { input: typeof po.input === "number" ? po.input : 0, output: typeof po.output === "number" ? po.output : 0 };
+}
+function effectivePrice(m) {
+  if (m.free) return 0;
+  const p = priceFor(m.provider, m.name);
+  return (p.input + p.output) / 2;
+}
+function computeCost(m, promptTok, completionTok) {
+  const p = priceFor(m.provider, m.name);
+  return (promptTok * p.input + completionTok * p.output) / 1e6;
+}
+
+// ---------------------------------------------------------------------------
+// cache risposte (exact-match, solo non-streaming)
+// ---------------------------------------------------------------------------
+let cacheHits = 0;
+const responseCache = new Map();
+function cacheKey(oaiBody) {
+  const { stream, ...rest } = oaiBody;
+  return crypto.createHash("sha256").update(JSON.stringify(rest)).digest("hex");
+}
+function cacheGet(key) {
+  if (!cacheOn) return null;
+  const hit = responseCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.ts > CACHE_TTL_MS) { responseCache.delete(key); return null; }
+  return hit.data;
+}
+function cachePut(key, data) {
+  if (!cacheOn) return;
+  if (responseCache.size >= CACHE_MAX) {
+    const oldest = responseCache.keys().next().value;
+    responseCache.delete(oldest);
+  }
+  responseCache.set(key, { ts: Date.now(), data });
+}
+
+// ---------------------------------------------------------------------------
+// request log (ring buffer + JSONL)
+// ---------------------------------------------------------------------------
+const REQ_LOG_MAX = 400;
+const reqLog = [];
+function recordRequest(entry) {
+  entry.ts = Date.now();
+  reqLog.push(entry);
+  if (reqLog.length > REQ_LOG_MAX) reqLog.shift();
+  try {
+    try {
+      const st = fs.statSync(REQUEST_LOG_FILE);
+      if (st.size > 8 * 1024 * 1024) fs.renameSync(REQUEST_LOG_FILE, REQUEST_LOG_FILE + ".old");
+    } catch {}
+    fs.appendFileSync(REQUEST_LOG_FILE, JSON.stringify(entry) + "\n");
+  } catch {}
+}
+
+// ---------------------------------------------------------------------------
+// model registry
+// ---------------------------------------------------------------------------
+let models = [];
+let modelMap = new Map();
+
+function resolveKey(authId) {
+  if (authId == null) return "";
+  if (authId.startsWith("env:")) return process.env[authId.slice(4)] || "";
+  const entry = auth[authId];
+  if (!entry) return "";
+  return typeof entry === "string" ? entry : (entry.key || "");
+}
+
+function today() {
+  const d = new Date();
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+
+function rebuildModels() {
+  const list = [];
+  for (const p of config.providers) {
+    const key = resolveKey(p.authId);
+    const keyOk = !p.needsKey || !!key;
+    for (const m of (p.models || [])) {
+      const id = `${p.name}/${m.name}`;
+      const knownFree = m.free === true || p.needsKey === false;
+      const prev = modelMap.get(id);
+      list.push({
+        id, provider: p.name, label: p.label || p.name, name: m.name,
+        baseURL: p.baseURL, authId: p.authId, needsKey: !!p.needsKey,
+        free: prev ? prev.free : knownFree,
+        key, keyOk, enabled: prev ? prev.enabled : (prefs.enabled[id] !== false),
+        healthy: true, fails: prev ? prev.fails : 0, failUntil: prev ? prev.failUntil : 0,
+        halfOpen: false, lastError: prev ? prev.lastError : "",
+        lastLatencyMs: prev ? prev.lastLatencyMs : 0,
+        requests: prev ? prev.requests : 0, tokens: prev ? prev.tokens : 0,
+        day: prev ? prev.day : today(), dailyReq: prev ? prev.dailyReq : 0, dailyTok: prev ? prev.dailyTok : 0,
+        cost: prev ? prev.cost || 0 : 0, dailyCost: prev ? prev.dailyCost || 0 : 0,
+        lifetimeFails: prev ? prev.lifetimeFails || 0 : 0,
+        lastTTFTMs: prev ? prev.lastTTFTMs || 0 : 0, avgTTFTMs: prev ? prev.avgTTFTMs || 0 : 0
+      });
+    }
+  }
+  models = list;
+  modelMap = new Map(list.map(m => [m.id, m]));
+  rebuildProfiles();
+  log(`rebuilt: ${models.length} models across ${config.providers.length} providers`);
+}
+
+function classify(id) {
+  const reasoning = /reason|r1|reasoner|thinking|\bo[13]\b|-o1-|qwq|nemotron-3-ultra|deepseek-v3|qwen-3-32b|glm-4-5/i.test(id);
+  const code = /cod(e|ing|er)|devstral|starcoder|deepseek-v3|glm-4-5|kimi-k2|minimax-m2|qwen-?2?\.?5?-?coder|qwen3-coder/i.test(id);
+  const fast = /8b|flash-lite|mini|turbo|small|lightning|nano|instant|1\.5-flash|70b-instruct|8b-instruct|qwen-turbo|solar-mini|gemma2|ministral|llama3\.1-8b/i.test(id);
+  return { reasoning, code, fast };
+}
+
+function catFirst(ids, pred) {
+  return [...ids.filter(id => pred(classify(id))), ...ids.filter(id => !pred(classify(id)))];
+}
+
+function rebuildProfiles() {
+  const enabledIds = models.filter(m => m.enabled).map(m => m.id);
+  const scored = enabledIds.slice().sort((a, b) => autorouteScore(b) - autorouteScore(a));
+  prefs.profiles.auto = scored;
+  prefs.profiles["auto-code"] = catFirst(scored, c => c.code);
+  prefs.profiles["auto-reasoning"] = catFirst(scored, c => c.reasoning);
+  prefs.profiles["auto-fast"] = catFirst(scored, c => c.fast);
+  prefs.profiles["free-pool"] = buildFreePool();
+  for (const prof of Object.keys(prefs.profiles)) {
+    const arr = prefs.profiles[prof];
+    if (!Array.isArray(arr)) { prefs.profiles[prof] = enabledIds.slice(); continue; }
+    const set = new Set(arr);
+    prefs.profiles[prof] = [
+      ...arr.filter(id => modelMap.has(id) && modelMap.get(id).enabled),
+      ...enabledIds.filter(id => !set.has(id))
+    ];
+  }
+  writeJSON(PREFS_FILE, prefs);
+}
+
+function buildFreePool() {
+  return models.filter(m => m.enabled && m.free)
+    .map(m => m.id)
+    .sort((a, b) => autorouteScore(b) - autorouteScore(a));
+}
+
+function providerDaily() {
+  const map = {};
+  for (const m of models) {
+    if (!m.enabled || !m.free) continue;
+    if (!map[m.provider]) map[m.provider] = { req: 0, tok: 0 };
+    map[m.provider].req += m.dailyReq;
+    map[m.provider].tok += m.dailyTok;
+  }
+  return map;
+}
+
+// ---------------------------------------------------------------------------
+// health / usage
+// ---------------------------------------------------------------------------
+function markFail(m, err, retryAfterMs) {
+  m.lifetimeFails = (m.lifetimeFails || 0) + 1;
+  m.lastFailAt = Date.now();
+  const base = retryAfterMs || Math.min(60000 * Math.pow(2, Math.min(m.fails, 6)), 3600000);
+  m.fails++;
+  m.failUntil = Date.now() + base;
+  m.halfOpen = false;
+  m.lastError = String(err).slice(0, 200);
+}
+function markOk(m) {
+  m.lastOkAt = Date.now();
+  m.fails = 0;
+  m.failUntil = 0;
+  m.halfOpen = false;
+  m.lastError = "";
+}
+function bumpRequest(m) {
+  if (m.day !== today()) { m.day = today(); m.dailyReq = 0; m.dailyTok = 0; }
+  m.requests++;
+  m.dailyReq++;
+}
+function addTokens(m, n, promptTok, completionTok) {
+  if (!n && !promptTok && !completionTok) return;
+  if (m.day !== today()) { m.day = today(); m.dailyReq = 0; m.dailyTok = 0; m.dailyCost = 0; }
+  if (n) m.tokens += n;
+  if (promptTok || completionTok) {
+    const cost = computeCost(m, promptTok || 0, completionTok || 0);
+    m.cost = (m.cost || 0) + cost;
+    m.dailyCost = (m.dailyCost || 0) + cost;
+    m.lastPromptTok = promptTok || 0;
+    m.lastCompletionTok = completionTok || 0;
+  }
+  m.dailyTok += (n || (promptTok || 0) + (completionTok || 0));
+}
+function captureUsage(chunk, m) {
+  try {
+    const s = chunk.toString();
+    let i = s.indexOf('"usage"');
+    while (i >= 0) {
+      const end = s.indexOf("}", i);
+      if (end < 0) break;
+      const frag = s.slice(i, end + 1);
+      const mt = frag.match(/total_tokens"?:\s*(\d+)/);
+      const mp = frag.match(/prompt_tokens"?:\s*(\d+)/);
+      const mc = frag.match(/completion_tokens"?:\s*(\d+)/);
+      if (mt || mp || mc) {
+        addTokens(m, mt ? parseInt(mt[1], 10) : 0,
+          mp ? parseInt(mp[1], 10) : 0,
+          mc ? parseInt(mc[1], 10) : 0);
+      }
+      i = s.indexOf('"usage"', i + 1);
+    }
+  } catch {}
+}
+
+function strategyFor(profile) {
+  const s = prefs.strategy && prefs.strategy[profile];
+  return STRATEGIES.includes(s) ? s : "order";
+}
+function applyStrategy(ids, strategy) {
+  const arr = ids.slice();
+  switch (strategy) {
+    case "cheapest":
+    case "cascade":
+      return arr.sort((a, b) => effectivePrice(modelMap.get(a)) - effectivePrice(modelMap.get(b)));
+    case "fastest":
+      return arr.sort((a, b) => {
+        const ma = modelMap.get(a), mb = modelMap.get(b);
+        const ta = ma.avgTTFTMs || ma.lastLatencyMs || Infinity;
+        const tb = mb.avgTTFTMs || mb.lastLatencyMs || Infinity;
+        return ta - tb;
+      });
+    case "least-used":
+      return arr.sort((a, b) => (modelMap.get(a).dailyReq || 0) - (modelMap.get(b).dailyReq || 0));
+    case "random":
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    case "autoroute":
+      return arr.sort((a, b) => autorouteScore(b) - autorouteScore(a));
+    default:
+      return arr;
+  }
+}
+function autorouteScore(id) {
+  const m = modelMap.get(id);
+  if (!m) return -Infinity;
+  const now = Date.now();
+  let s = 0;
+  if (m.failUntil && m.failUntil > now) s -= 100000;
+  const total = (m.requests || 0) + (m.lifetimeFails || 0);
+  s += (total ? 1 - (m.lifetimeFails || 0) / total : 0.5) * 500;
+  const lat = m.avgTTFTMs || m.lastLatencyMs;
+  s += lat ? Math.max(0, 300 - lat / 100) : 150;
+  if (m.free) s += 200;
+  if (m.lastFailAt && (!m.lastOkAt || m.lastFailAt > m.lastOkAt)) s -= 300;
+  return s;
+}
+const enhanceCache = new Map();
+function featuresCfg() {
+  const f = prefs.features || (prefs.features = {});
+  return {
+    cache: typeof f.cache === "boolean" ? f.cache : cacheOn,
+    autoProbe: typeof f.autoProbe === "boolean" ? f.autoProbe : autoProbeOn
+  };
+}
+function enhancerCfg() {
+  const e = prefs.enhancer || {};
+  return {
+    enabled: typeof e.enabled === "boolean" ? e.enabled : process.env.MODELHUB_ENHANCE !== "0",
+    model: modelMap.has(e.model) ? e.model : null,
+    maxChars: e.maxChars || 4000,
+    timeoutMs: e.timeoutMs || 12000
+  };
+}
+async function maybeEnhance(body, req) {
+  const cfg = enhancerCfg();
+  try {
+    if (!cfg.enabled || !cfg.model) return;
+    if (req && req.headers["x-modelhub-no-enhance"]) return;
+    if (!body || !Array.isArray(body.messages)) return;
+    if (body.tools || body.tool_choice || body.functions || body.function_call) return;
+    const msgs = body.messages;
+    const last = [...msgs].reverse().find(x => x && x.role === "user");
+    if (!last || typeof last.content !== "string") return;
+    const original = last.content.trim();
+    if (original.length < 16 || original.length > cfg.maxChars) return;
+    const em = modelMap.get(cfg.model);
+    if (!em || !em.enabled) return;
+    const hash = crypto.createHash("sha1").update(original).digest("hex");
+    const hit = enhanceCache.get(hash);
+    let enhanced = hit && Date.now() - hit.ts < 3600000 ? hit.enhanced : null;
+    if (!enhanced) {
+      const sys = "You are a prompt enhancer inside ModelHub. Rewrite the user prompt so it is clearer, unambiguous and complete, preserving intent, language and every technical detail. Never answer the prompt. Output ONLY the rewritten prompt.";
+      const r = await Promise.race([
+        postNonStreaming(em, {
+          messages: [
+            { role: "system", content: sys },
+            { role: "user", content: original }
+          ],
+          temperature: 0.3,
+          max_tokens: Math.min(900, Math.max(220, Math.ceil(original.length / 2)))
+        }),
+        new Promise(resolve => setTimeout(() => resolve({ ok: false, error: "enhance timeout" }), cfg.timeoutMs))
+      ]);
+      let out = "";
+      if (r.ok && r.data && r.data.choices && r.data.choices[0] && r.data.choices[0].message) {
+        out = String(r.data.choices[0].message.content || "");
+      } else {
+        throw new Error(r.error || "bad enhancer response");
+      }
+      out = out.replace(/^```[^\n]*\n?/, "").replace(/```\s*$/, "").trim();
+      if (!out || out.length < 8) throw new Error("empty enhancement");
+      enhanced = out;
+      recordRequest({ proto: "enhance", reqModel: body.model, model: cfg.model, ok: true, error: "", latencyMs: r.latencyMs || 0, ttftMs: null, promptTok: r.promptTok || 0, completionTok: r.completionTok || 0, totalTok: r.totalTok || 0, cost: computeCost(em, r.promptTok || 0, r.completionTok || 0), cached: false });
+      if (enhanceCache.size > 500) enhanceCache.clear();
+      enhanceCache.set(hash, { ts: Date.now(), enhanced });
+    }
+    last.originalContent = last.content;
+    last.content = enhanced;
+  } catch (e) {
+    recordRequest({ proto: "enhance", reqModel: body && body.model, model: cfg.model, ok: false, error: String((e && e.message) || e).slice(0, 120), latencyMs: 0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
+  }
+}
+function cascadeValid(data) {
+  const c = data && data.choices && data.choices[0];
+  if (!c || !c.message) return false;
+  const msg = c.message;
+  if (typeof msg.content === "string" && msg.content.trim()) return true;
+  if (Array.isArray(msg.content) && msg.content.some(p => p.text)) return true;
+  if (msg.tool_calls && msg.tool_calls.length) return true;
+  return false;
+}
+
+function selectCandidates(modelId, profile) {
+  if (modelId && modelMap.has(modelId) && modelMap.get(modelId).enabled) return [modelId];
+  const stripped = modelId && modelId.includes("/") ? modelId.slice(modelId.indexOf("/") + 1) : modelId;
+  if (stripped && modelMap.has(stripped) && modelMap.get(stripped).enabled) return [stripped];
+  const order = prefs.profiles[profile] || prefs.profiles.auto || [];
+  const now = Date.now();
+  const healthy = order.filter(id => {
+    const m = modelMap.get(id);
+    return m && m.enabled && (!m.failUntil || m.failUntil <= now);
+  });
+  const pool = applyStrategy(healthy.length ? healthy : order.filter(id => modelMap.has(id) && modelMap.get(id).enabled), strategyFor(profile));
+  return pool;
+}
+
+function parseRetryAfter(upRes, body) {
+  const header = (upRes.headers["retry-after"] || upRes.headers["Retry-After"] || "");
+  if (header) {
+    const n = parseInt(header, 10);
+    if (!isNaN(n)) return n * 1000;
+    const d = new Date(header);
+    if (!isNaN(d.getTime())) return Math.max(0, d.getTime() - Date.now());
+  }
+  try {
+    const o = JSON.parse(body || "{}");
+    if (typeof o.retry_after === "number") return o.retry_after * 1000;
+    if (typeof o.retryAfter === "number") return o.retryAfter * 1000;
+  } catch {}
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// upstream call (non-streaming: Promise<object>)
+// ---------------------------------------------------------------------------
+function postNonStreaming(m, openaiBody) {
+  return new Promise((resolve) => {
+    const payload = JSON.stringify({ ...openaiBody, model: m.name, stream: false });
+    const t0 = Date.now();
+    let u;
+    try { u = new URL(m.baseURL); } catch { markFail(m, "bad url"); return resolve({ ok: false, error: "bad url" }); }
+    const transport = u.protocol === "https:" ? https : http;
+    const req = transport.request({
+      method: "POST",
+      hostname: u.hostname,
+      path: u.pathname + (u.search || ""),
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": m.key ? `Bearer ${m.key}` : "",
+        "Content-Length": Buffer.byteLength(payload)
+      }
+    }, (upRes) => {
+      if (!upRes.statusCode || upRes.statusCode < 200 || upRes.statusCode >= 300) {
+        let b = "";
+        upRes.on("data", d => b += d);
+        upRes.on("end", () => {
+          const ra = parseRetryAfter(upRes, b);
+          const code = upRes.statusCode;
+          if (code === 429) markFail(m, `HTTP 429`, ra || null);
+          else if (/402|403/.test(String(code))) { m.free = false; markFail(m, `HTTP ${code} (paid)`, null); }
+          else if (code === 401) markFail(m, `HTTP 401 (key?)`, null);
+          else markFail(m, `HTTP ${code} ${b.slice(0, 120)}`, null);
+          resolve({ ok: false, error: `HTTP ${code}`, httpCode: code });
+        });
+        return;
+      }
+      const latencyMs = Date.now() - t0;
+      markOk(m);
+      bumpRequest(m);
+      m.lastLatencyMs = latencyMs;
+      let buf = "";
+      upRes.on("data", d => buf += d);
+      upRes.on("end", () => {
+        try {
+          const data = JSON.parse(buf);
+          const u2 = data.usage || {};
+          const pt = u2.prompt_tokens || 0;
+          const ct = u2.completion_tokens || 0;
+          addTokens(m, u2.total_tokens || (pt + ct), pt, ct);
+          resolve({ ok: true, data, promptTok: pt, completionTok: ct, totalTok: pt + ct, latencyMs });
+        } catch {
+          resolve({ ok: false, error: "bad json from upstream" });
+        }
+      });
+    });
+    req.on("error", e => { markFail(m, e.message, null); resolve({ ok: false, error: e.message }); });
+    req.setTimeout(UPSTREAM_TIMEOUT_NONSTREAM_MS, () => { req.destroy(new Error("timeout")); markFail(m, "timeout", null); resolve({ ok: false, error: "timeout" }); });
+    req.write(payload);
+    req.end();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// non-streaming con failover sui candidati del profilo
+// ---------------------------------------------------------------------------
+async function postWithFailover(openaiBody) {
+  const profile = (openaiBody.model && prefs.profiles[openaiBody.model]) ? openaiBody.model : "auto";
+  const strategy = strategyFor(profile);
+  const tried = [];
+  const ck = cacheKey(openaiBody);
+  const cached = cacheGet(ck);
+  if (cached) {
+    cacheHits++;
+    recordRequest({ proto: "cache", reqModel: openaiBody.model, model: null, ok: true, error: "", latencyMs: 0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: true });
+    return { ok: true, data: { ...cached, modelhub_cached: true }, modelId: null, cached: true };
+  }
+  const candidates = selectCandidates(openaiBody.model, profile);
+  let lastError = "all upstreams failed";
+  while (candidates.length) {
+    const id = candidates.shift();
+    const m = modelMap.get(id);
+    if (!m || !m.enabled) continue;
+    tried.push(id);
+    const r = await postNonStreaming(m, { ...openaiBody, model: m.name });
+    if (!r.ok) { lastError = `${id}: ${r.error}`; continue; }
+    if (!cascadeValid(r.data)) {
+      lastError = `${id}: skipped (empty/invalid content)`;
+      continue;
+    }
+    cachePut(ck, r.data);
+    recordRequest({
+      proto: "chat", reqModel: openaiBody.model, model: id, ok: true, error: "",
+      latencyMs: r.latencyMs || 0, ttftMs: null,
+      promptTok: r.promptTok || 0, completionTok: r.completionTok || 0, totalTok: r.totalTok || 0,
+      cost: computeCost(m, r.promptTok || 0, r.completionTok || 0), cached: false
+    });
+    return { ok: true, data: r.data, modelId: id, tried };
+  }
+  recordRequest({ proto: "chat", reqModel: openaiBody.model, model: null, ok: false, error: lastError, latencyMs: 0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
+  return { ok: false, error: lastError };
+}
+
+// ---------------------------------------------------------------------------
+// streaming helper: failover + traduzione protocollo
+// ---------------------------------------------------------------------------
+function escCh(s) {
+  return String(s).replace(/[\\\"\u0000-\u001f]/g, c => {
+    switch (c) {
+      case "\\": return "\\\\";
+      case "\"": return "\\\"";
+      case "\n": return "\\n";
+      case "\r": return "\\r";
+      case "\t": return "\\t";
+      default: return "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0");
+    }
+  });
+}
+
+function writeSSE(res, s) { res.write("data: " + s + "\n\n"); }
+
+const translators = {
+  anthropic: {
+    onStart(res) {
+      writeSSE(res, '{"type":"message_start","message":{"role":"assistant","content":[]}}');
+      writeSSE(res, '{"type":"content_block_start","index":0,"content_block":{"type":"text"}}');
+    },
+    onDelta(res, text) {
+      writeSSE(res, `{"type":"content_block_delta","index":0,"content_block":{"index":0,"type":"text"},"delta":{"text":"${escCh(text)}"}}`);
+    },
+    onDone(res, finishReason) {
+      writeSSE(res, '{"type":"content_block_stop","index":0}');
+      writeSSE(res, '{"type":"message_stop"}');
+      res.end();
+    }
+  },
+  gemini: {
+    onStart(res, model) { this._model = model; },
+    onDelta(res, text) {
+      writeSSE(res, `{"candidates":[{"content":{"parts":[{"text":"${escCh(text)}"}],"role":"model"}}]}`);
+    },
+    onDone(res, finishReason) {
+      if (finishReason) {
+        const map = { stop: "STOP", length: "MAX_TOKENS", content_filter: "SAFETY" };
+        writeSSE(res, JSON.stringify({ candidates: [{ content: { parts: [], role: "model" }, finishReason: map[finishReason] || "OTHER" }] }));
+      }
+      res.end();
+    }
+  },
+  ollama: {
+    onStart(res, model) { this._model = model; this._full = ""; },
+    onDelta(res, text) {
+      this._full += text;
+      writeSSE(res, JSON.stringify({ model: this._model, message: { role: "assistant", content: text }, done: false }));
+    },
+    onDone(res) {
+      writeSSE(res, JSON.stringify({ model: this._model, message: { role: "assistant", content: this._full }, done: true }));
+      res.end();
+    }
+  }
+};
+
+function streamWithFailover(openaiBody, res, protocol) {
+  return new Promise((resolve) => {
+    const profile = (openaiBody.model && prefs.profiles[openaiBody.model]) ? openaiBody.model : "auto";
+    const candidates = selectCandidates(openaiBody.model, profile);
+    const translator = translators[protocol];
+    const makeXlat = typeof translator === "function" ? translator : () => translator;
+    const xlat = makeXlat(res);
+    let idx = 0;
+    let committed = false;
+
+    const attempt = () => {
+      if (committed) return;
+      while (idx < candidates.length) {
+        const id = candidates[idx++];
+        const m = modelMap.get(id);
+        if (!m || !m.enabled) continue;
+        const reqBody = JSON.stringify({ ...openaiBody, model: m.name, stream: true });
+        const t0 = Date.now();
+        let u;
+        try { u = new URL(m.baseURL); } catch { markFail(m, "bad url"); continue; }
+        const transport = u.protocol === "https:" ? https : http;
+        const req = transport.request({
+          method: "POST",
+          hostname: u.hostname,
+          path: u.pathname + (u.search || ""),
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": m.key ? `Bearer ${m.key}` : "",
+            "Content-Length": Buffer.byteLength(reqBody)
+          }
+        }, (upRes) => {
+          if (!upRes.statusCode || upRes.statusCode < 200 || upRes.statusCode >= 300) {
+            let b = "";
+            upRes.on("data", d => b += d);
+            upRes.on("end", () => {
+              const ra = parseRetryAfter(upRes, b);
+              const code = upRes.statusCode;
+              if (code === 429) markFail(m, `HTTP 429`, ra || null);
+              else if (/402|403/.test(String(code))) { m.free = false; markFail(m, `HTTP ${code} (paid)`, null); }
+              else if (code === 401) markFail(m, `HTTP 401 (key?)`, null);
+              else markFail(m, `HTTP ${code} ${b.slice(0, 120)}`, null);
+              recordRequest({ proto: "stream:" + protocol, reqModel: openaiBody.model, model: id, ok: false, error: `HTTP ${code}`, latencyMs: Date.now() - t0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
+            });
+            attempt();
+            return;
+          }
+          markOk(m);
+          bumpRequest(m);
+          m.lastLatencyMs = Date.now() - t0;
+          committed = true;
+          res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive" });
+          xlat.onStart(res, m.name);
+          const pt = new PassThrough();
+          upRes.pipe(pt);
+          let buf = "";
+          let full = "";
+          let finished = false;
+          let firstAt = null;
+
+          function done() {
+            if (finished) return;
+            finished = true;
+            xlat.onDone(res);
+            recordRequest({
+              proto: "stream:" + protocol, reqModel: openaiBody.model, model: id, ok: true, error: "",
+              latencyMs: Date.now() - t0, ttftMs: firstAt ? firstAt - t0 : null,
+              promptTok: 0, completionTok: 0, totalTok: 0, cost: null, cached: false
+            });
+            resolve();
+          }
+
+          pt.on("data", (chunk) => {
+            if (firstAt == null) {
+              firstAt = Date.now();
+              const ttft = firstAt - t0;
+              m.lastTTFTMs = ttft;
+              m.avgTTFTMs = m.avgTTFTMs ? Math.round((m.avgTTFTMs * 3 + ttft) / 4) : ttft;
+            }
+            buf += chunk.toString();
+            const lines = buf.split("\n\n");
+            buf = lines.pop();
+            for (const line of lines) {
+              if (!line.startsWith("data: ")) continue;
+              const raw = line.slice(6);
+              if (raw === "[DONE]") { done(); return; }
+              try {
+                const ev = JSON.parse(raw);
+                const ch = ev.choices && ev.choices[0];
+                if (ch && ch.delta) {
+                  if (ch.delta.content) {
+                    full += ch.delta.content;
+                    xlat.onDelta && xlat.onDelta(res, ch.delta.content);
+                  }
+                }
+                if (ch && ch.finish_reason) {
+                  xlat.onDone && xlat.onDone(res, ch.finish_reason);
+                  return;
+                }
+              } catch {}
+            }
+          });
+          pt.on("end", () => { if (!finished) done(); });
+          pt.on("error", () => { if (!finished) done(); });
+          return;
+        });
+        req.on("error", (e) => {
+          markFail(m, e.message || "error", null);
+          recordRequest({ proto: "stream:" + protocol, reqModel: openaiBody.model, model: id, ok: false, error: String(e.message || e).slice(0, 120), latencyMs: Date.now() - t0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
+          attempt();
+        });
+        req.setTimeout(UPSTREAM_TIMEOUT_MS, () => {
+          req.destroy(new Error("timeout"));
+          markFail(m, "timeout", null);
+          recordRequest({ proto: "stream:" + protocol, reqModel: openaiBody.model, model: id, ok: false, error: "timeout", latencyMs: Date.now() - t0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
+          attempt();
+        });
+        req.write(reqBody);
+        req.end();
+        return;
+      }
+      recordRequest({ proto: "stream:" + protocol, reqModel: openaiBody.model, model: null, ok: false, error: "all upstreams failed", latencyMs: 0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
+      res.writeHead(502, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "all upstreams failed", model: openaiBody.model }));
+      resolve();
+    };
+    attempt();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// protocol adapters (entrante -> OpenAI; uscente OpenAI -> protocollo)
+// ---------------------------------------------------------------------------
+function anthropicToOpenAI(body) {
+  const messages = [];
+  if (body.system) messages.push({ role: "system", content: body.system });
+  for (const msg of (body.messages || [])) {
+    messages.push({ role: msg.role === "assistant" ? "assistant" : "user", content: msg.content });
+  }
+  return {
+    model: body.model,
+    messages,
+    max_tokens: body.max_tokens || 1024,
+    temperature: body.temperature,
+    stream: body.stream === true,
+    stop: body.stop
+  };
+}
+function openAIToAnthropic(data, model) {
+  const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
+  const usage = data.usage || {};
+  return {
+    id: data.id || "msg_" + Date.now(),
+    type: "message",
+    role: "assistant",
+    model: model,
+    stop_reason: "end_turn",
+    content: [{ type: "text", text }],
+    usage: { input_tokens: usage.prompt_tokens || 0, output_tokens: usage.completion_tokens || 0 }
+  };
+}
+function geminiGenerateToOpenAI(model, body) {
+  const messages = [];
+  for (const c of (body.contents || [])) {
+    const role = c.role === "model" ? "assistant" : "user";
+    const text = (c.parts || []).map(p => p.text || "").join("");
+    messages.push({ role, content: text });
+  }
+  return {
+    model,
+    messages,
+    max_tokens: (body.generationConfig && body.generationConfig.maxOutputTokens) || 1024,
+    stream: body.generationConfig && body.generationConfig.stream === true,
+    temperature: body.generationConfig && body.generationConfig.temperature
+  };
+}
+function openAIToGemini(data, finishReason) {
+  const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
+  const usage = data.usage || {};
+  const map = { stop: "STOP", length: "MAX_TOKENS", content_filter: "SAFETY" };
+  const fr = finishReason ? map[finishReason] || "OTHER" : undefined;
+  return {
+    candidates: [{ content: { parts: [{ text }], role: "model" }, ...(fr ? { finishReason: fr } : {}) }],
+    usageMetadata: { promptTokenCount: usage.prompt_tokens || 0, candidatesTokenCount: usage.completion_tokens || 0 }
+  };
+}
+function ollamaChatToOpenAI(body) {
+  return {
+    model: body.model,
+    messages: body.messages || [],
+    stream: body.stream === true,
+    max_tokens: (body.options && body.options.num_predict) || 1024,
+    temperature: body.options && body.options.temperature
+  };
+}
+function openAIToOllama(data, model) {
+  const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
+  return {
+    model,
+    message: { role: "assistant", content: text },
+    done: true
+  };
+}
+
+// ---------------------------------------------------------------------------
+// auth
+// ---------------------------------------------------------------------------
+function controlAuthorized(req) {
+  if (!CONTROL_TOKEN) return true;
+  const h = req.headers["x-modelhub-token"] || "";
+  const auth = typeof req.headers["authorization"] === "string"
+    ? req.headers["authorization"].replace(/^Bearer\s+/i, "")
+    : "";
+  return h === CONTROL_TOKEN || auth === CONTROL_TOKEN;
+}
+function gatewayAuthorized(req) {
+  if (!prefs.gatewayKeys || !prefs.gatewayKeys.length) return true;
+  const auth = typeof req.headers["authorization"] === "string"
+    ? req.headers["authorization"].replace(/^Bearer\s+/i, "")
+    : "";
+  const alt = req.headers["x-api-key"] || "";
+  return prefs.gatewayKeys.includes(auth) || prefs.gatewayKeys.includes(alt);
+}
+
+// ---------------------------------------------------------------------------
+// upstream helpers (discovery / embeddings)
+// ---------------------------------------------------------------------------
+function deriveEndpoint(baseURL, name) {
+  if (/chat\/completions\/?$/.test(baseURL)) return baseURL.replace(/chat\/completions\/?$/, name);
+  return baseURL.replace(/\/+$/, "") + "/" + name;
+}
+function fetchJSON(targetURL, apiKey) {
+  return new Promise((resolve, reject) => {
+    let u;
+    try { u = new URL(targetURL); } catch { return reject(new Error("bad url")); }
+    const transport = u.protocol === "https:" ? https : http;
+    const req = transport.request({
+      method: "GET",
+      hostname: u.hostname,
+      path: u.pathname + (u.search || ""),
+      headers: { "Authorization": apiKey ? `Bearer ${apiKey}` : "", "Accept": "application/json" }
+    }, (res) => {
+      let b = "";
+      res.on("data", d => b += d);
+      res.on("end", () => {
+        try { resolve(JSON.parse(b)); } catch { reject(new Error("bad json")); }
+      });
+    });
+    req.on("error", e => reject(e));
+    req.setTimeout(15000, () => { req.destroy(new Error("timeout")); reject(new Error("timeout")); });
+    req.end();
+  });
+}
+function embeddingsForward(m, body) {
+  return new Promise((resolve) => {
+    const payload = JSON.stringify({ model: m.name, input: body.input, encoding_format: body.encoding_format });
+    const t0 = Date.now();
+    let u;
+    try { u = new URL(deriveEndpoint(m.baseURL, "embeddings")); } catch { return resolve({ ok: false, error: "bad url" }); }
+    const transport = u.protocol === "https:" ? https : http;
+    const req = transport.request({
+      method: "POST",
+      hostname: u.hostname,
+      path: u.pathname + (u.search || ""),
+      headers: { "Content-Type": "application/json", "Authorization": m.key ? `Bearer ${m.key}` : "", "Content-Length": Buffer.byteLength(payload) }
+    }, (upRes) => {
+      let b = "";
+      upRes.on("data", d => b += d);
+      upRes.on("end", () => {
+        const latencyMs = Date.now() - t0;
+        if (!upRes.statusCode || upRes.statusCode < 200 || upRes.statusCode >= 300) {
+          markFail(m, `HTTP ${upRes.statusCode} (embeddings)`, null);
+          return resolve({ ok: false, error: `HTTP ${upRes.statusCode}` });
+        }
+        markOk(m);
+        bumpRequest(m);
+        m.lastLatencyMs = latencyMs;
+        try {
+          const data = JSON.parse(b);
+          const pt = (data.usage && data.usage.prompt_tokens) || 0;
+          addTokens(m, pt, pt, 0);
+          resolve({ ok: true, data, promptTok: pt, totalTok: pt, latencyMs });
+        } catch { resolve({ ok: false, error: "bad json from upstream" }); }
+      });
+    });
+    req.on("error", e => { markFail(m, e.message, null); resolve({ ok: false, error: e.message }); });
+    req.setTimeout(60000, () => { req.destroy(new Error("timeout")); markFail(m, "timeout", null); resolve({ ok: false, error: "timeout" }); });
+    req.write(payload);
+    req.end();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// control API
+// ---------------------------------------------------------------------------
+function controlState() {
+  const totals = models.reduce((a, m) => {
+    a.req += m.dailyReq || 0;
+    a.tok += m.dailyTok || 0;
+    a.cost += m.dailyCost || 0;
+    a.lifetimeCost += m.cost || 0;
+    if (m.enabled && (!m.failUntil || m.failUntil <= Date.now())) a.healthy++;
+    return a;
+  }, { req: 0, tok: 0, cost: 0, lifetimeCost: 0, healthy: 0 });
+  return {
+    version: VERSION,
+    port: config.port,
+    uptimeSec: Math.round((Date.now() - startTime) / 1000),
+    providers: config.providers.map(p => ({ name: p.name, label: p.label, needsKey: !!p.needsKey, modelCount: (p.models || []).length, keyUrl: p.keyUrl || SIGNUP_URLS[p.name] || "" })),
+    keysPresent: config.providers.reduce((a, p) => { a[p.name] = !!(p.authId && resolveKey(p.authId)); return a; }, {}),
+    profiles: Object.keys(prefs.profiles),
+    profileOrder: prefs.profiles,
+    strategies: prefs.strategy,
+    enhancer: enhancerCfg(),
+    leaderboard: models.filter(m => m.enabled).map(m => ({
+      id: m.id, free: m.free,
+      healthy: !m.failUntil || m.failUntil <= Date.now(),
+      avgTTFTMs: m.avgTTFTMs || 0,
+      requests: m.requests || 0, fails: m.lifetimeFails || 0,
+      score: Math.round(autorouteScore(m.id))
+    })).sort((a, b) => b.score - a.score).slice(0, 30),
+    pricing: { currency: pricing.currency || "USD", providers: pricing.providers },
+    gatewayKeys: prefs.gatewayKeys,
+    cache: { enabled: cacheOn, size: responseCache.size, hits: cacheHits, ttlMs: CACHE_TTL_MS },
+    features: featuresCfg(),
+    totals: { req: totals.req, tok: totals.tok, cost: Math.round(totals.cost * 1e4) / 1e4, lifetimeCost: Math.round(totals.lifetimeCost * 1e4) / 1e4, healthy: totals.healthy },
+    models: models.map(m => ({
+      id: m.id, provider: m.provider, label: m.label, name: m.name,
+      free: m.free, enabled: m.enabled, keyOk: m.keyOk,
+      healthy: !m.failUntil || m.failUntil <= Date.now(),
+      fails: m.fails, lastError: m.lastError, lastLatencyMs: m.lastLatencyMs,
+      lastTTFTMs: m.lastTTFTMs || 0, avgTTFTMs: m.avgTTFTMs || 0,
+      requests: m.requests, tokens: m.tokens,
+      dailyReq: m.dailyReq, dailyTok: m.dailyTok,
+      dailyCost: Math.round((m.dailyCost || 0) * 1e4) / 1e4,
+      cost: Math.round((m.cost || 0) * 1e4) / 1e4
+    }))
+  };
+}
+function sendJSON(res, code, obj) {
+  res.writeHead(code, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(obj));
+}
+function readBody(req) {
+  return new Promise((resolve) => {
+    let b = "";
+    req.on("data", d => b += d);
+    req.on("end", () => { try { resolve(JSON.parse(b || "{}")); } catch { resolve({}); } });
+  });
+}
+async function handleControl(req, res, url) {
+  if (req.method === "GET" && url === "/hub/state") return sendJSON(res, 200, controlState());
+  if (req.method === "GET" && url === "/hub/config") return sendJSON(res, 200, config);
+  if (req.method === "GET" && url === "/hub/providers") {
+    const out = config.providers.map(p => {
+      const ms = (p.models || []).map(m => {
+        const entry = modelMap.get(`${p.name}/${m.name}`);
+        return { name: m.name, free: m.free, enabled: !!(entry && entry.enabled), knownFree: !!m.free };
+      });
+      return { name: p.name, label: p.label, needsKey: !!p.needsKey, authId: p.authId, baseURL: p.baseURL, models: ms };
+    });
+    return sendJSON(res, 200, out);
+  }
+
+  if (req.method === "GET" && url === "/hub/export") {
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      version: VERSION,
+      config,
+      pricing,
+      prefs,
+      keys: auth
+    };
+    res.writeHead(200, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Content-Disposition": `attachment; filename="modelhub-export-${new Date().toISOString().slice(0, 10)}.json"`
+    });
+    return res.end(JSON.stringify(payload, null, 2));
+  }
+
+  const body = await readBody(req);
+  if (url === "/hub/key/reveal" && body.provider) {
+    const p = config.providers.find(x => x.name === body.provider);
+    const aid = (p && p.authId && !p.authId.startsWith("env:")) ? p.authId : body.provider;
+    const key = resolveKey(aid);
+    if (!key) return sendJSON(res, 404, { error: "no key stored" });
+    return sendJSON(res, 200, { ok: true, key });
+  }
+  if (url === "/hub/features") {
+    const f = prefs.features || (prefs.features = {});
+    if (typeof body.cache === "boolean") { f.cache = body.cache; cacheOn = body.cache; }
+    if (typeof body.autoProbe === "boolean") { f.autoProbe = body.autoProbe; autoProbeOn = body.autoProbe; }
+    writeJSON(PREFS_FILE, prefs);
+    return sendJSON(res, 200, { ok: true, features: featuresCfg() });
+  }
+  if (url === "/hub/toggle" && body.id) {
+    prefs.enabled[body.id] = body.enabled !== false;
+    writeJSON(PREFS_FILE, prefs);
+    rebuildProfiles();
+    return sendJSON(res, 200, { ok: true });
+  }
+  if (url === "/hub/reorder" && Array.isArray(body.order)) {
+    const prof = body.profile || "auto";
+    prefs.profiles[prof] = body.order.filter(id => modelMap.has(id));
+    writeJSON(PREFS_FILE, prefs);
+    return sendJSON(res, 200, { ok: true });
+  }
+  if (url === "/hub/profile/create" && body.name) {
+    if (!prefs.profiles[body.name]) prefs.profiles[body.name] = models.filter(m => m.enabled).map(m => m.id);
+    writeJSON(PREFS_FILE, prefs);
+    return sendJSON(res, 200, { ok: true, profiles: Object.keys(prefs.profiles) });
+  }
+  if (url === "/hub/profile/delete" && body.name && !DEFAULT_PROFILES.includes(body.name)) {
+    delete prefs.profiles[body.name];
+    writeJSON(PREFS_FILE, prefs);
+    return sendJSON(res, 200, { ok: true, profiles: Object.keys(prefs.profiles) });
+  }
+  if (url === "/hub/keys" && body.provider) {
+    const key = body.key || "";
+    const p = config.providers.find(x => x.name === body.provider);
+    const aid = (p && p.authId && !p.authId.startsWith("env:")) ? p.authId : body.provider;
+    if (key) auth[aid] = key; else delete auth[aid];
+    writeAuth(auth);
+    rebuildModels();
+    return sendJSON(res, 200, { ok: true });
+  }
+  if (url === "/hub/provider/add" && body.name && body.baseURL) {
+    if (!config.providers.find(p => p.name === body.name)) {
+      config.providers.push({
+        name: body.name,
+        label: body.label || body.name,
+        baseURL: body.baseURL,
+        authId: body.authId || null,
+        needsKey: !!body.needsKey,
+        models: (body.models || []).map(m => ({ name: m.name, free: !!m.free }))
+      });
+      writeJSON(CONFIG_FILE, config);
+      rebuildModels();
+      return sendJSON(res, 200, { ok: true });
+    }
+    return sendJSON(res, 409, { error: "provider exists" });
+  }
+  if (url === "/hub/provider/remove" && body.name) {
+    config.providers = config.providers.filter(p => p.name !== body.name);
+    writeJSON(CONFIG_FILE, config);
+    rebuildModels();
+    return sendJSON(res, 200, { ok: true });
+  }
+  if (req.method === "GET" && url === "/hub/logs") {
+    return sendJSON(res, 200, { logs: reqLog.slice().reverse() });
+  }
+  if (url === "/hub/strategy" && body.profile && STRATEGIES.includes(body.strategy)) {
+    prefs.strategy[body.profile] = body.strategy;
+    writeJSON(PREFS_FILE, prefs);
+    return sendJSON(res, 200, { ok: true, strategies: prefs.strategy });
+  }
+  if (url === "/hub/enhancer") {
+    const e = prefs.enhancer || (prefs.enhancer = {});
+    if (typeof body.enabled === "boolean") e.enabled = body.enabled;
+    if (body.model !== undefined) {
+      if (body.model && !modelMap.has(body.model)) return sendJSON(res, 400, { error: "unknown model" });
+      e.model = body.model || "";
+    }
+    if (Number.isFinite(body.maxChars)) e.maxChars = Math.max(200, body.maxChars);
+    if (Number.isFinite(body.timeoutMs)) e.timeoutMs = Math.max(1000, body.timeoutMs);
+    writeJSON(PREFS_FILE, prefs);
+    return sendJSON(res, 200, { ok: true, enhancer: enhancerCfg() });
+  }
+  if (req.method === "GET" && url === "/hub/pricing") {
+    return sendJSON(res, 200, pricing);
+  }
+  if (url === "/hub/pricing" && body.provider) {
+    pricing.providers = pricing.providers || {};
+    pricing.providers[body.provider] = { input: Number(body.input) || 0, output: Number(body.output) || 0 };
+    writeJSON(PRICING_FILE, pricing);
+    return sendJSON(res, 200, { ok: true });
+  }
+  if (url === "/hub/gateway-keys" && Array.isArray(body.keys)) {
+    prefs.gatewayKeys = body.keys.map(k => String(k).trim()).filter(Boolean);
+    writeJSON(PREFS_FILE, prefs);
+    return sendJSON(res, 200, { ok: true, count: prefs.gatewayKeys.length });
+  }
+  if (url === "/hub/cache") {
+    responseCache.clear();
+    cacheHits = 0;
+    return sendJSON(res, 200, { ok: true });
+  }
+  if (url === "/hub/discover" && body.provider) {
+    const p = config.providers.find(x => x.name === body.provider);
+    if (!p) return sendJSON(res, 404, { error: "provider not found" });
+    try {
+      const list = await fetchJSON(deriveEndpoint(p.baseURL, "models"), resolveKey(p.authId));
+      const known = new Set((p.models || []).map(m => m.name));
+      let added = 0;
+      for (const it of (list.data || [])) {
+        const name = typeof it === "string" ? it : it.id;
+        if (!name || known.has(name)) continue;
+        p.models = p.models || [];
+        p.models.push({ name, free: false });
+        known.add(name);
+        added++;
+      }
+      writeJSON(CONFIG_FILE, config);
+      rebuildModels();
+      return sendJSON(res, 200, { ok: true, added, total: (p.models || []).length });
+    } catch (e) {
+      return sendJSON(res, 502, { error: e.message });
+    }
+  }
+  if (url === "/hub/probe") {
+    const targets = body.id ? [modelMap.get(body.id)] : models.filter(m => m.enabled);
+    for (const m of targets) {
+      if (!m) continue;
+      await new Promise((res2) => {
+        const body = JSON.stringify({ model: m.name, messages: [{ role: "user", content: "ping" }], max_tokens: 1, stream: false });
+        const t0 = Date.now();
+        const u = new URL(m.baseURL);
+        const transport = u.protocol === "https:" ? https : http;
+        const req = transport.request({
+          method: "POST",
+          hostname: u.hostname,
+          path: u.pathname + (u.search || ""),
+          headers: { "Content-Type": "application/json", "Authorization": m.key ? `Bearer ${m.key}` : "", "Content-Length": Buffer.byteLength(body) }
+        }, (upRes) => {
+          if (!upRes.statusCode || upRes.statusCode < 200 || upRes.statusCode >= 300) {
+            let b = "";
+            upRes.on("data", d => b += d);
+            upRes.on("end", () => {
+              const ra = parseRetryAfter(upRes, b);
+              const code = upRes.statusCode;
+              if (code === 429) markFail(m, `HTTP 429`, ra || null);
+              else if (/402|403/.test(String(code))) { m.free = false; m.enabled = false; markFail(m, `HTTP ${code} (paid)`, null); }
+              else if (code === 401) markFail(m, `HTTP 401 (key?)`, null);
+              else markFail(m, `HTTP ${code} ${b.slice(0, 120)}`, null);
+            });
+          } else {
+            markOk(m);
+            m.lastLatencyMs = Date.now() - t0;
+            bumpRequest(m);
+          }
+          res2();
+        });
+        req.on("error", e => { markFail(m, e.message, null); res2(); });
+        req.setTimeout(15000, () => { req.destroy(new Error("timeout")); markFail(m, "timeout", null); res2(); });
+        req.write(body);
+        req.end();
+      });
+    }
+    rebuildProfiles();
+    return sendJSON(res, 200, controlState());
+  }
+  return sendJSON(res, 404, { error: "unknown control" });
+}
+
+// ---------------------------------------------------------------------------
+// Prometheus metrics
+// ---------------------------------------------------------------------------
+function promMetrics() {
+  const now = Date.now();
+  const lines = [];
+  lines.push("# TYPE modelhub_uptime_seconds gauge");
+  lines.push(`modelhub_uptime_seconds ${Math.round((now - startTime) / 1000)}`);
+  lines.push("# TYPE modelhub_cache_hits_total counter");
+  lines.push(`modelhub_cache_hits_total ${cacheHits}`);
+  lines.push("# TYPE modelhub_cache_entries gauge");
+  lines.push(`modelhub_cache_entries ${responseCache.size}`);
+  lines.push("# TYPE modelhub_models gauge");
+  lines.push(`modelhub_models{state="enabled"} ${models.filter(m => m.enabled).length}`);
+  lines.push(`modelhub_models{state="healthy"} ${models.filter(m => m.enabled && (!m.failUntil || m.failUntil <= now)).length}`);
+  lines.push("# TYPE modelhub_requests_total counter");
+  for (const m of models) {
+    if (!m.requests && !m.lifetimeFails) continue;
+    lines.push(`modelhub_requests_total{model="${m.id}",status="ok"} ${m.requests || 0}`);
+    lines.push(`modelhub_requests_total{model="${m.id}",status="fail"} ${m.lifetimeFails || 0}`);
+  }
+  lines.push("# TYPE modelhub_tokens_total counter");
+  for (const m of models) {
+    if (!m.tokens) continue;
+    lines.push(`modelhub_tokens_total{model="${m.id}"} ${m.tokens}`);
+  }
+  lines.push("# TYPE modelhub_cost_dollars_total counter");
+  for (const m of models) {
+    if (!m.cost) continue;
+    lines.push(`modelhub_cost_dollars_total{model="${m.id}"} ${(m.cost || 0).toFixed(6)}`);
+  }
+  lines.push("# TYPE modelhub_upstream_latency_ms gauge");
+  for (const m of models) {
+    if (!m.lastLatencyMs) continue;
+    lines.push(`modelhub_upstream_latency_ms{model="${m.id}"} ${m.lastLatencyMs}`);
+    if (m.avgTTFTMs) lines.push(`modelhub_ttft_ms{model="${m.id}"} ${m.avgTTFTMs}`);
+  }
+  return lines.join("\n") + "\n";
+}
+
+// ---------------------------------------------------------------------------
+// HTTP server
+// ---------------------------------------------------------------------------
+const startTime = Date.now();
+const OPEN_PATHS = new Set(["/v1/models", "/models", "/api/tags", "/api/show"]);
+const server = http.createServer(async (req, res) => {
+  const url = req.url.split("?")[0];
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-api-key, x-modelhub-token");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
+  try {
+    if (url === "/metrics") {
+      res.writeHead(200, { "Content-Type": "text/plain; version=0.0.4" });
+      return res.end(promMetrics());
+    }
+    if (url.startsWith("/hub/")) {
+      if (!controlAuthorized(req)) return sendJSON(res, 401, { error: "unauthorized" });
+      return await handleControl(req, res, url);
+    }
+    if (!OPEN_PATHS.has(url) && !gatewayAuthorized(req)) return sendJSON(res, 401, { error: "invalid or missing API key" });
+
+    if (req.method === "GET" && (url === "/v1/models" || url === "/models")) {
+      const profileData = Object.keys(prefs.profiles).map(name => ({
+        id: name, object: "model", owned_by: "modelhub", root: name,
+        provider: "modelhub", label: "Profilo: " + name, free: false, isProfile: true
+      }));
+      const modelData = models.filter(m => m.enabled).map(m => ({
+        id: m.id, object: "model", owned_by: m.provider, root: m.name,
+        provider: m.provider, label: m.label, free: m.free
+      }));
+      return sendJSON(res, 200, { object: "list", data: [...profileData, ...modelData] });
+    }
+
+    // OpenAI streaming
+    let parsedChat = null;
+    if (req.method === "POST" && url.includes("chat/completions")) {
+      let body = "";
+      for await (const c of req) body += c;
+      try { parsedChat = JSON.parse(body); } catch { res.writeHead(400); return res.end("bad json"); }
+      if (!parsedChat || !parsedChat.model) { res.writeHead(400); return res.end("missing model"); }
+    }
+    if (parsedChat) await maybeEnhance(parsedChat, req);
+    if (parsedChat && parsedChat.stream === true) {
+      const parsed = parsedChat;
+      const profile = (parsed.model && prefs.profiles[parsed.model]) ? parsed.model : "auto";
+      const candidates = selectCandidates(parsed.model, profile);
+      const attempt = () => {
+        if (!candidates.length) {
+          recordRequest({ proto: "stream:openai", reqModel: parsed.model, model: null, ok: false, error: "all upstreams failed", latencyMs: 0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
+          res.writeHead(502, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "no candidates" }));
+          return;
+        }
+        const id = candidates.shift();
+        const m = modelMap.get(id);
+        if (!m || !m.enabled) { attempt(); return; }
+        const reqBody = JSON.stringify({ ...parsed, model: m.name, stream: true });
+        const t0 = Date.now();
+        let clientStarted = false;
+        let u;
+        try { u = new URL(m.baseURL); } catch { markFail(m, "bad url"); attempt(); return; }
+        const transport = u.protocol === "https:" ? https : http;
+        const req = transport.request({
+          method: "POST",
+          hostname: u.hostname,
+          path: u.pathname + (u.search || ""),
+          headers: { "Content-Type": "application/json", "Authorization": m.key ? `Bearer ${m.key}` : "", "Content-Length": Buffer.byteLength(reqBody) }
+        }, (upRes) => {
+          if (!upRes.statusCode || upRes.statusCode < 200 || upRes.statusCode >= 300) {
+            let b = "";
+            upRes.on("data", d => b += d);
+            upRes.on("end", () => {
+              const ra = parseRetryAfter(upRes, b);
+              const code = upRes.statusCode;
+              if (code === 429) markFail(m, `HTTP 429`, ra || null);
+              else if (/402|403/.test(String(code))) { m.free = false; markFail(m, `HTTP ${code} (paid)`, null); }
+              else if (code === 401) markFail(m, `HTTP 401 (key?)`, null);
+              else markFail(m, `HTTP ${code} ${b.slice(0, 120)}`, null);
+              recordRequest({ proto: "stream:openai", reqModel: parsed.model, model: id, ok: false, error: `HTTP ${code}`, latencyMs: Date.now() - t0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
+            });
+            attempt();
+            return;
+          }
+          const latencyMs = Date.now() - t0;
+          markOk(m);
+          bumpRequest(m);
+          m.lastLatencyMs = latencyMs;
+          const pt = new PassThrough();
+          upRes.pipe(pt);
+          let firstAt = null;
+          pt.on("data", c => {
+            if (!clientStarted) {
+              clientStarted = true;
+              res.writeHead(upRes.statusCode, upRes.headers);
+            }
+            if (firstAt == null) {
+              firstAt = Date.now();
+              const ttft = firstAt - t0;
+              m.lastTTFTMs = ttft;
+              m.avgTTFTMs = m.avgTTFTMs ? Math.round((m.avgTTFTMs * 3 + ttft) / 4) : ttft;
+            }
+            captureUsage(c, m);
+            res.write(c);
+          });
+          pt.on("end", () => {
+            if (!clientStarted) {
+              markFail(m, "empty stream", null);
+              recordRequest({ proto: "stream:openai", reqModel: parsed.model, model: id, ok: false, error: "empty stream", latencyMs: Date.now() - t0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
+              attempt();
+              return;
+            }
+            recordRequest({
+              proto: "stream:openai", reqModel: parsed.model, model: id, ok: true, error: "",
+              latencyMs: Date.now() - t0, ttftMs: firstAt ? firstAt - t0 : null,
+              promptTok: 0, completionTok: 0, totalTok: 0, cost: null, cached: false
+            });
+            res.end();
+          });
+          return;
+        });
+        req.on("error", (e) => {
+          if (clientStarted) { try { res.end(); } catch {} return; }
+          markFail(m, e.message, null);
+          recordRequest({ proto: "stream:openai", reqModel: parsed.model, model: id, ok: false, error: String(e.message || e).slice(0, 120), latencyMs: Date.now() - t0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
+          attempt();
+        });
+        req.setTimeout(UPSTREAM_TIMEOUT_MS, () => {
+          req.destroy(new Error("timeout"));
+          if (clientStarted) { try { res.end(); } catch {} }
+          else {
+            markFail(m, "timeout", null);
+            recordRequest({ proto: "stream:openai", reqModel: parsed.model, model: id, ok: false, error: "timeout", latencyMs: Date.now() - t0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
+            attempt();
+          }
+        });
+        req.write(reqBody);
+        req.end();
+        return;
+      };
+      attempt();
+      return;
+    }
+
+    // OpenAI non-streaming
+    if (req.method === "POST" && url.includes("chat/completions") && parsedChat) {
+      const r = await postWithFailover(parsedChat);
+      if (r.ok) {
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify(r.data));
+        return;
+      }
+      res.writeHead(502, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: r.error }));
+      return;
+    }
+
+    // Embeddings (OpenAI-compatible con failover)
+    if (req.method === "POST" && url.endsWith("/embeddings")) {
+      const parsed = await readBody(req);
+      if (!parsed || !parsed.model) { res.writeHead(400); return res.end("missing model"); }
+      const profile = (parsed.model && prefs.profiles[parsed.model]) ? parsed.model : "auto";
+      const candidates = selectCandidates(parsed.model, profile).slice(0, 3);
+      for (const id of candidates) {
+        const m = modelMap.get(id);
+        if (!m || !m.enabled) continue;
+        const out = await embeddingsForward(m, parsed);
+        if (out.ok) {
+          recordRequest({ proto: "embeddings", reqModel: parsed.model, model: id, ok: true, error: "", latencyMs: out.latencyMs, ttftMs: null, promptTok: out.promptTok || 0, completionTok: 0, totalTok: out.totalTok || 0, cost: computeCost(m, out.promptTok || 0, 0), cached: false });
+          res.setHeader("Content-Type", "application/json");
+          return res.end(JSON.stringify(out.data));
+        }
+      }
+      recordRequest({ proto: "embeddings", reqModel: parsed.model, model: null, ok: false, error: "all upstreams failed", latencyMs: 0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
+      res.writeHead(502, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: "no embedding upstream succeeded" }));
+    }
+
+    // Anthropic
+    if (req.method === "POST" && url === "/v1/messages") {
+      const body = await readBody(req);
+      if (body.stream === true) {
+        const oai = anthropicToOpenAI(body);
+        return streamWithFailover(oai, res, "anthropic");
+      }
+      const oai = anthropicToOpenAI(body);
+      const r = await postWithFailover(oai);
+      if (r.ok) {
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify(openAIToAnthropic(r.data, body.model)));
+        return;
+      }
+      res.writeHead(502, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: r.error }));
+      return;
+    }
+
+    // Gemini OpenAI-compatible (includes /v1beta/openai/chat/completions)
+    if (req.method === "POST" && url.includes("/v1beta/openai")) {
+      let body = "";
+      for await (const c of req) body += c;
+      let parsed;
+      try { parsed = JSON.parse(body || "{}"); } catch { parsed = {}; }
+      const streaming = parsed.stream === true;
+      if (streaming) {
+        return streamWithFailover(parsed, res, "gemini");
+      }
+      const r = await postWithFailover(parsed);
+      if (r.ok) {
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify(r.data));
+        return;
+      }
+      res.writeHead(502, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: r.error }));
+      return;
+    }
+
+    // Gemini native
+    const gm = url.match(/^\/v1beta\/models\/(.+):generateContent$/);
+    if (req.method === "POST" && gm) {
+      const body = await readBody(req);
+      const oai = geminiGenerateToOpenAI(gm[1], body);
+      const streaming = body.generationConfig && body.generationConfig.stream === true;
+      if (streaming) {
+        return streamWithFailover(oai, res, "gemini");
+      }
+      const r = await postWithFailover(oai);
+      if (r.ok) {
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify(openAIToGemini(r.data)));
+        return;
+      }
+      res.writeHead(502, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: r.error }));
+      return;
+    }
+
+    // Ollama
+    if (req.method === "POST" && url === "/api/chat") {
+      const body = await readBody(req);
+      const oai = ollamaChatToOpenAI(body);
+      if (body.stream === true) {
+        return streamWithFailover(oai, res, "ollama");
+      }
+      const r = await postWithFailover(oai);
+      if (r.ok) {
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify(openAIToOllama(r.data, body.model)));
+        return;
+      }
+      res.writeHead(502, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: r.error }));
+      return;
+    }
+    if (req.method === "GET" && url === "/api/tags") {
+      const names = models.filter(m => m.enabled).map(m => m.id);
+      for (const p of Object.keys(prefs.profiles)) names.push(p);
+      return sendJSON(res, 200, { models: names.map(n => ({ name: n, model: n })) });
+    }
+    if (req.method === "POST" && url === "/api/show") {
+      const body = await readBody(req);
+      const m = modelMap.get(body.name) || models.find(x => x.name === body.name);
+      return sendJSON(res, 200, { name: body.name, details: { family: m ? m.provider : "?", parameter_size: "?" } });
+    }
+
+    res.writeHead(404);
+    res.end("not found");
+  } catch (e) {
+    log("handler error: " + e.message);
+    if (!res.headersSent) { res.writeHead(500); }
+    res.end(JSON.stringify({ error: e.message }));
+  }
+});
+
+// ---------------------------------------------------------------------------
+// CLI
+// ---------------------------------------------------------------------------
+function cliProviders() {
+  for (const p of config.providers) {
+    console.log(`[${p.name}] ${p.label} ${p.needsKey ? "(chiave: " + (p.authId || "sì") + ")" : "(keyless)"} ${p.baseURL}`);
+    for (const m of (p.models || [])) {
+      const entry = modelMap.get(`${p.name}/${m.name}`);
+      const enabled = !!(entry && entry.enabled);
+      const knownFree = !!m.free;
+      console.log(`  - ${m.name} free:${knownFree} enabled:${enabled}`);
+    }
+  }
+}
+async function cliCheck() {
+  rebuildModels();
+  const targets = models.filter(m => m.enabled);
+  console.log(`provo ${targets.length} modelli enabled...`);
+  await probeAll(targets);
+  console.log("\nrisultato:");
+  for (const m of models) {
+    const ok = !m.failUntil || m.failUntil <= Date.now();
+    const paid = !m.free;
+    console.log(`  ${m.id} free:${m.free} enabled:${m.enabled} healthy:${ok} lastError:"${m.lastError}"`);
+  }
+}
+async function cliTest(modelId, prompt) {
+  rebuildModels();
+  const openaiBody = {
+    model: modelId,
+    messages: [{ role: "user", content: prompt || "ping" }],
+    max_tokens: 100,
+    stream: false
+  };
+  const r = await postWithFailover(openaiBody);
+  if (r.ok) {
+    console.log(JSON.stringify(r.data, null, 2));
+  } else {
+    console.log("errore:", r.error);
+  }
+}
+async function probeAll(targets) {
+  if (!targets || !targets.length) {
+    targets = models.filter(m => m.enabled);
+  }
+  const promises = targets.map(m => probeOne(m));
+  await Promise.allSettled(promises);
+  rebuildProfiles();
+}
+async function probeOne(m) {
+  const body = JSON.stringify({ model: m.name, messages: [{ role: "user", content: "ping" }], max_tokens: 1, stream: false });
+  const t0 = Date.now();
+  const u = new URL(m.baseURL);
+  const transport = u.protocol === "https:" ? https : http;
+  return new Promise((resolve) => {
+    const req = transport.request({
+      method: "POST",
+      hostname: u.hostname,
+      path: u.pathname + (u.search || ""),
+      headers: { "Content-Type": "application/json", "Authorization": m.key ? `Bearer ${m.key}` : "", "Content-Length": Buffer.byteLength(body) }
+    }, (upRes) => {
+      if (!upRes.statusCode || upRes.statusCode < 200 || upRes.statusCode >= 300) {
+        let b = "";
+        upRes.on("data", d => b += d);
+        upRes.on("end", () => {
+          const ra = parseRetryAfter(upRes, b);
+          const code = upRes.statusCode;
+          if (code === 429) markFail(m, `HTTP 429`, ra || null);
+          else if (/402|403/.test(String(code))) { m.free = false; m.enabled = false; markFail(m, `HTTP ${code} (paid)`, null); }
+          else if (code === 401) markFail(m, `HTTP 401 (key?)`, null);
+          else markFail(m, `HTTP ${code} ${b.slice(0, 120)}`, null);
+        });
+      } else {
+        markOk(m);
+        m.lastLatencyMs = Date.now() - t0;
+        bumpRequest(m);
+      }
+      resolve();
+    });
+    req.on("error", e => { markFail(m, e.message, null); resolve(); });
+    req.setTimeout(15000, () => { req.destroy(new Error("timeout")); markFail(m, "timeout", null); resolve(); });
+    req.write(body);
+    req.end();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// main
+// ---------------------------------------------------------------------------
+async function main() {
+  rebuildModels();
+
+  // CLI mode: don't start HTTP server
+  if (process.argv[2] === "providers") {
+    cliProviders();
+    process.exit(0);
+  }
+  if (process.argv[2] === "check") {
+    probeAll().then(() => {
+      for (const m of models) {
+        const ok = !m.failUntil || m.failUntil <= Date.now();
+        console.log(`${m.id} free:${m.free} enabled:${m.enabled} healthy:${ok} lastError:"${m.lastError}"`);
+      }
+    }).catch(err => { console.error(err.message); process.exit(1); });
+    return;
+  }
+  if (process.argv[2] === "test" && process.argv[3]) {
+    cliTest(process.argv[3], process.argv[4]).then(() => process.exit(0)).catch(err => { console.error(err.message); process.exit(1); });
+    return;
+  }
+  if (process.argv[2] === "probe" && process.argv[3]) {
+    const id = process.argv[3];
+    const m = modelMap.get(id) || models.find(x => x.id === id);
+    if (!m) { console.error("modello non trovato"); process.exit(1); }
+    await probeOne(m);
+    console.log(`${m.id} free:${m.free} enabled:${m.enabled} healthy:${!m.failUntil || m.failUntil <= Date.now()} lastError:"${m.lastError}"`);
+    process.exit(0);
+    return;
+  }
+
+  startHub();
+}
+
+function startBackgroundProber() {
+  let backgroundProbing = false;
+  setInterval(() => {
+    const now = Date.now();
+    for (const m of models) {
+      if (m.failUntil && m.failUntil <= now) { m.failUntil = 0; }
+    }
+    if (!autoProbeOn || backgroundProbing) return;
+    const due = models.filter(m => m.enabled && !m.halfOpen && m.fails > 0 && m.failUntil <= now);
+    if (!due.length) return;
+    backgroundProbing = true;
+    const batch = due.slice(0, 6);
+    Promise.allSettled(batch.map(async m => {
+      m.halfOpen = true;
+      try { await probeOne(m); } finally { m.halfOpen = false; }
+    })).then(() => { backgroundProbing = false; });
+  }, 60000);
+}
+
+function startHub() {
+  rebuildModels();
+  const listen = () => {
+    server.listen(PORT, "127.0.0.1", () => log(`ModelHub listening on ${PORT}`));
+    startBackgroundProber();
+  };
+  if (featuresCfg().autoProbe) {
+    log("startup probe: testing all enabled models...");
+    probeAll().then(() => {
+      log("startup probe done");
+      listen();
+    }).catch(err => {
+      log("startup probe error: " + err.message);
+      listen();
+    });
+  } else {
+    listen();
+  }
+}
+
+if (require.main === module) main();
+
+module.exports = {
+  escCh, classify, parseRetryAfter,
+  anthropicToOpenAI, openAIToAnthropic, geminiGenerateToOpenAI, openAIToGemini,
+  ollamaChatToOpenAI, openAIToOllama,
+  encryptAuth, decryptAuth, looksLikeAuth,
+  priceFor, computeCost, effectivePrice, cascadeValid, deriveEndpoint,
+  strategyFor, applyStrategy, selectCandidates, postWithFailover, controlAuthorized, gatewayAuthorized, startHub,
+  __setState(state = {}) {
+    if (Array.isArray(state.models)) { models = state.models; modelMap = new Map(state.models.map(m => [m.id, m])); }
+    if (state.prefs) prefs = state.prefs;
+    if (state.config) config = state.config;
+    if (state.pricing) pricing = state.pricing;
+  }
+};
