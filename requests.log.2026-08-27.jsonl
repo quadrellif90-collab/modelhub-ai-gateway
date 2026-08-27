@@ -55,3 +55,12 @@
 {"proto":"chat","reqModel":"auto","model":"p/good","ok":true,"error":"","latencyMs":1,"ttftMs":null,"promptTok":1,"completionTok":1,"totalTok":2,"cost":0.000002,"cached":false,"ts":1787827724019}
 {"proto":"chat","reqModel":"auto","model":"p/good","ok":true,"error":"","latencyMs":1,"ttftMs":null,"promptTok":1,"completionTok":1,"totalTok":2,"cost":0.000002,"cached":false,"ts":1787827724028}
 {"proto":"chat","reqModel":"auto","model":null,"ok":false,"error":"p/bad: HTTP 500","latencyMs":0,"ttftMs":null,"promptTok":0,"completionTok":0,"totalTok":0,"cost":0,"cached":false,"ts":1787827724033}
+{"proto":"chat","reqModel":"auto","model":"p/good","ok":true,"error":"","latencyMs":1,"ttftMs":null,"promptTok":1,"completionTok":1,"totalTok":2,"cost":0.000002,"cached":false,"ts":1787827784557}
+{"proto":"chat","reqModel":"auto","model":"p/good","ok":true,"error":"","latencyMs":0,"ttftMs":null,"promptTok":1,"completionTok":1,"totalTok":2,"cost":0.000002,"cached":false,"ts":1787827784564}
+{"proto":"chat","reqModel":"auto","model":null,"ok":false,"error":"p/bad: HTTP 500","latencyMs":0,"ttftMs":null,"promptTok":0,"completionTok":0,"totalTok":0,"cost":0,"cached":false,"ts":1787827784571}
+{"proto":"chat","reqModel":"auto","model":"p/good","ok":true,"error":"","latencyMs":1,"ttftMs":null,"promptTok":1,"completionTok":1,"totalTok":2,"cost":0.000002,"cached":false,"ts":1787827832882}
+{"proto":"chat","reqModel":"auto","model":"p/good","ok":true,"error":"","latencyMs":1,"ttftMs":null,"promptTok":1,"completionTok":1,"totalTok":2,"cost":0.000002,"cached":false,"ts":1787827832890}
+{"proto":"chat","reqModel":"auto","model":null,"ok":false,"error":"p/bad: HTTP 500","latencyMs":0,"ttftMs":null,"promptTok":0,"completionTok":0,"totalTok":0,"cost":0,"cached":false,"ts":1787827832895}
+{"proto":"chat","reqModel":"auto","model":"p/good","ok":true,"error":"","latencyMs":1,"ttftMs":null,"promptTok":1,"completionTok":1,"totalTok":2,"cost":0.000002,"cached":false,"ts":1787827900903}
+{"proto":"chat","reqModel":"auto","model":"p/good","ok":true,"error":"","latencyMs":0,"ttftMs":null,"promptTok":1,"completionTok":1,"totalTok":2,"cost":0.000002,"cached":false,"ts":1787827900912}
+{"proto":"chat","reqModel":"auto","model":null,"ok":false,"error":"p/bad: HTTP 500","latencyMs":0,"ttftMs":null,"promptTok":0,"completionTok":0,"totalTok":0,"cost":0,"cached":false,"ts":1787827900917}

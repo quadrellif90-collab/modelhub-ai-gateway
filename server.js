@@ -11,7 +11,10 @@ const cryptoLib = require("./server/crypto.js");
 const protocolsLib = require("./server/protocols.js");
 const modelsLib = require("./server/models.js");
 const loggingLib = require("./server/logging.js");
+const storageLib = require("./server/storage.js");
 const routingLib = require("./server/routing.js");
+const cacheLib = require("./server/cache.js");
+const metricsLib = require("./server/metrics.js");
 
 const PORT = parseInt(process.env.MODELHUB_PORT || "8787", 10);
 const DIR = process.env.MODELHUB_DIR || __dirname;
@@ -109,15 +112,7 @@ function log(m) {
 // ---------------------------------------------------------------------------
 // storage
 // ---------------------------------------------------------------------------
-function readJSON(file, fallback) {
-  try {
-    const raw = fs.readFileSync(file, "utf8");
-    return JSON.parse(raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw);
-  } catch { return fallback; }
-}
-function writeJSON(file, obj) {
-  try { fs.writeFileSync(file, JSON.stringify(obj, null, 2)); } catch (e) { log("write err " + file + ": " + e.message); }
-}
+const { readJSON, writeJSON } = storageLib;
 let authWasPlain = false;
 function readAuth() {
   try {
@@ -132,8 +127,8 @@ function readAuth() {
   } catch { return {}; }
 }
 function writeAuth(obj) {
-  if (ENV_PLAIN) { writeJSON(AUTH_FILE, obj); return; }
-  writeJSON(AUTH_FILE, encryptAuth(obj));
+  if (ENV_PLAIN) { writeJSON(AUTH_FILE, obj, log); return; }
+  writeJSON(AUTH_FILE, encryptAuth(obj), log);
 }
 
 // ---------------------------------------------------------------------------
@@ -193,18 +188,7 @@ function computeCost(m, promptTok, completionTok) {
 // ---------------------------------------------------------------------------
 let cacheHits = 0;
 const responseCache = new Map();
-function cacheKey(oaiBody) {
-  const { stream, messages, ...rest } = oaiBody;
-  let prefix = "";
-  if (Array.isArray(messages)) {
-    const sys = (messages.find(m => m.role === "system") || {}).content;
-    const lastUser = messages.filter(m => m.role === "user").pop();
-    const lu = typeof lastUser?.content === "string" ? lastUser.content : "";
-    const sample = `${typeof sys === "string" ? sys.slice(0, 200) : ""}|${lu.slice(0, 256)}`;
-    prefix = crypto.createHash("sha1").update(sample).digest("hex").slice(0, 16);
-  }
-  return crypto.createHash("sha256").update(prefix + "|" + JSON.stringify(rest)).digest("hex");
-}
+const { cacheKey } = cacheLib;
 function cacheGet(key) {
   if (!cacheOn) return null;
   const hit = responseCache.get(key);
@@ -326,7 +310,7 @@ function rebuildProfiles() {
       ...enabledIds.filter(id => !set.has(id))
     ];
   }
-  writeJSON(PREFS_FILE, prefs);
+  writeJSON(PREFS_FILE, prefs, log);
 }
 
 // ---------------------------------------------------------------------------
@@ -1163,7 +1147,7 @@ async function handleControl(req, res, url) {
     if (inc.config && Array.isArray(inc.config.providers)) {
       config = Object.assign({}, inc.config, { port: config.port });
       imported.providers = config.providers.length;
-      writeJSON(CONFIG_FILE, config);
+      writeJSON(CONFIG_FILE, config, log);
     }
     if (inc.keys && typeof inc.keys === "object") {
       for (const [k, v] of Object.entries(inc.keys)) {
@@ -1177,7 +1161,7 @@ async function handleControl(req, res, url) {
         if (inc.prefs[k] !== undefined) prefs[k] = inc.prefs[k];
       }
       imported.profiles = Object.keys(prefs.profiles || {}).length;
-      writeJSON(PREFS_FILE, prefs);
+      writeJSON(PREFS_FILE, prefs, log);
     }
     if (inc.pricing && typeof inc.pricing === "object" && inc.pricing.providers) {
       pricing = inc.pricing;
@@ -1200,7 +1184,7 @@ async function handleControl(req, res, url) {
     if (typeof body.cache === "boolean") { f.cache = body.cache; cacheOn = body.cache; }
     if (typeof body.autoProbe === "boolean") { f.autoProbe = body.autoProbe; autoProbeOn = body.autoProbe; }
     if (typeof body.startMinimized === "boolean") f.startMinimized = body.startMinimized;
-    writeJSON(PREFS_FILE, prefs);
+    writeJSON(PREFS_FILE, prefs, log);
     return sendJSON(res, 200, { ok: true, features: featuresCfg() });
   }
   if (url === "/hub/settings") {
@@ -1215,29 +1199,29 @@ async function handleControl(req, res, url) {
       newToken = crypto.randomBytes(24).toString("hex");
       prefs.controlToken = newToken;
     }
-    writeJSON(PREFS_FILE, prefs);
+    writeJSON(PREFS_FILE, prefs, log);
     return sendJSON(res, 200, { ok: true, settings: settingsCfg(), regeneratedToken: newToken });
   }
   if (url === "/hub/toggle" && body.id) {
     prefs.enabled[body.id] = body.enabled !== false;
-    writeJSON(PREFS_FILE, prefs);
+    writeJSON(PREFS_FILE, prefs, log);
     rebuildProfiles();
     return sendJSON(res, 200, { ok: true });
   }
   if (url === "/hub/reorder" && Array.isArray(body.order)) {
     const prof = body.profile || "auto";
     prefs.profiles[prof] = body.order.filter(id => modelMap.has(id));
-    writeJSON(PREFS_FILE, prefs);
+    writeJSON(PREFS_FILE, prefs, log);
     return sendJSON(res, 200, { ok: true });
   }
   if (url === "/hub/profile/create" && body.name) {
     if (!prefs.profiles[body.name]) prefs.profiles[body.name] = models.filter(m => m.enabled).map(m => m.id);
-    writeJSON(PREFS_FILE, prefs);
+    writeJSON(PREFS_FILE, prefs, log);
     return sendJSON(res, 200, { ok: true, profiles: Object.keys(prefs.profiles) });
   }
   if (url === "/hub/profile/delete" && body.name && !DEFAULT_PROFILES.includes(body.name)) {
     delete prefs.profiles[body.name];
-    writeJSON(PREFS_FILE, prefs);
+    writeJSON(PREFS_FILE, prefs, log);
     return sendJSON(res, 200, { ok: true, profiles: Object.keys(prefs.profiles) });
   }
   if (url === "/hub/keys" && body.provider) {
@@ -1274,13 +1258,13 @@ async function handleControl(req, res, url) {
         discovered = prov.models.length;
       } catch (e) { discovered = 0; }
     }
-    writeJSON(CONFIG_FILE, config);
+    writeJSON(CONFIG_FILE, config, log);
     rebuildModels();
     return sendJSON(res, 200, { ok: true, discovered, models: prov.models.length });
   }
   if (url === "/hub/provider/remove" && body.name) {
     config.providers = config.providers.filter(p => p.name !== body.name);
-    writeJSON(CONFIG_FILE, config);
+    writeJSON(CONFIG_FILE, config, log);
     rebuildModels();
     return sendJSON(res, 200, { ok: true });
   }
@@ -1289,7 +1273,7 @@ async function handleControl(req, res, url) {
   }
   if (url === "/hub/strategy" && body.profile && STRATEGIES.includes(body.strategy)) {
     prefs.strategy[body.profile] = body.strategy;
-    writeJSON(PREFS_FILE, prefs);
+    writeJSON(PREFS_FILE, prefs, log);
     return sendJSON(res, 200, { ok: true, strategies: prefs.strategy });
   }
   if (url === "/hub/enhancer") {
@@ -1302,7 +1286,7 @@ async function handleControl(req, res, url) {
     }
     if (Number.isFinite(body.maxChars)) e.maxChars = Math.max(200, body.maxChars);
     if (Number.isFinite(body.timeoutMs)) e.timeoutMs = Math.max(1000, body.timeoutMs);
-    writeJSON(PREFS_FILE, prefs);
+    writeJSON(PREFS_FILE, prefs, log);
     return sendJSON(res, 200, { ok: true, enhancer: enhancerCfg() });
   }
   if (req.method === "GET" && url === "/hub/pricing") {
@@ -1316,7 +1300,7 @@ async function handleControl(req, res, url) {
   }
   if (url === "/hub/gateway-keys" && Array.isArray(body.keys)) {
     prefs.gatewayKeys = body.keys.map(k => String(k).trim()).filter(Boolean);
-    writeJSON(PREFS_FILE, prefs);
+    writeJSON(PREFS_FILE, prefs, log);
     return sendJSON(res, 200, { ok: true, count: prefs.gatewayKeys.length });
   }
   if (url === "/hub/cache") {
@@ -1335,17 +1319,17 @@ async function handleControl(req, res, url) {
     const lim = prefs.keylimits[k] || (prefs.keylimits[k] = {});
     if (Number.isFinite(body.tokens)) lim.tokens = body.tokens;
     if (Number.isFinite(body.spend)) lim.spend = body.spend;
-    writeJSON(PREFS_FILE, prefs);
+    writeJSON(PREFS_FILE, prefs, log);
     return sendJSON(res, 200, { ok: true, key: k, limit: keyLimit(k) });
   }
   if (url === "/hub/experiments" && req.method === "POST") {
     prefs.experiments = { enabled: !!body.enabled, profile: body.profile || "auto", candidate: body.candidate || "", splitPct: Number.isFinite(body.splitPct) ? body.splitPct : 0 };
-    writeJSON(PREFS_FILE, prefs);
+    writeJSON(PREFS_FILE, prefs, log);
     return sendJSON(res, 200, { ok: true, experiments: prefs.experiments });
   }
   if (url === "/hub/alerts" && req.method === "POST") {
     prefs.alerts = { webhook: body.webhook || "" };
-    writeJSON(PREFS_FILE, prefs);
+    writeJSON(PREFS_FILE, prefs, log);
     return sendJSON(res, 200, { ok: true, alerts: prefs.alerts });
   }
   if (url === "/hub/discover") {
@@ -1371,7 +1355,7 @@ async function handleControl(req, res, url) {
       const p = config.providers.find(x => x.name === body.provider);
       if (!p) return sendJSON(res, 404, { error: "provider not found" });
       const results = [await runProvider(p)];
-      writeJSON(CONFIG_FILE, config);
+      writeJSON(CONFIG_FILE, config, log);
       rebuildModels();
       return sendJSON(res, 200, { ok: true, results });
     }
@@ -1381,7 +1365,7 @@ async function handleControl(req, res, url) {
     await Promise.all(Array.from({ length: Math.min(4, queue.length) }, async () => {
       while (queue.length) { results.push(await runProvider(queue.shift())); }
     }));
-    writeJSON(CONFIG_FILE, config);
+    writeJSON(CONFIG_FILE, config, log);
     rebuildModels();
     return sendJSON(res, 200, { ok: true, scanned: targets.length, results });
   }
@@ -1434,40 +1418,7 @@ async function handleControl(req, res, url) {
 // Prometheus metrics
 // ---------------------------------------------------------------------------
 function promMetrics() {
-  const now = Date.now();
-  const lines = [];
-  lines.push("# TYPE modelhub_uptime_seconds gauge");
-  lines.push(`modelhub_uptime_seconds ${Math.round((now - startTime) / 1000)}`);
-  lines.push("# TYPE modelhub_cache_hits_total counter");
-  lines.push(`modelhub_cache_hits_total ${cacheHits}`);
-  lines.push("# TYPE modelhub_cache_entries gauge");
-  lines.push(`modelhub_cache_entries ${responseCache.size}`);
-  lines.push("# TYPE modelhub_models gauge");
-  lines.push(`modelhub_models{state="enabled"} ${models.filter(m => m.enabled).length}`);
-  lines.push(`modelhub_models{state="healthy"} ${models.filter(m => m.enabled && (!m.failUntil || m.failUntil <= now)).length}`);
-  lines.push("# TYPE modelhub_requests_total counter");
-  for (const m of models) {
-    if (!m.requests && !m.lifetimeFails) continue;
-    lines.push(`modelhub_requests_total{model="${m.id}",status="ok"} ${m.requests || 0}`);
-    lines.push(`modelhub_requests_total{model="${m.id}",status="fail"} ${m.lifetimeFails || 0}`);
-  }
-  lines.push("# TYPE modelhub_tokens_total counter");
-  for (const m of models) {
-    if (!m.tokens) continue;
-    lines.push(`modelhub_tokens_total{model="${m.id}"} ${m.tokens}`);
-  }
-  lines.push("# TYPE modelhub_cost_dollars_total counter");
-  for (const m of models) {
-    if (!m.cost) continue;
-    lines.push(`modelhub_cost_dollars_total{model="${m.id}"} ${(m.cost || 0).toFixed(6)}`);
-  }
-  lines.push("# TYPE modelhub_upstream_latency_ms gauge");
-  for (const m of models) {
-    if (!m.lastLatencyMs) continue;
-    lines.push(`modelhub_upstream_latency_ms{model="${m.id}"} ${m.lastLatencyMs}`);
-    if (m.avgTTFTMs) lines.push(`modelhub_ttft_ms{model="${m.id}"} ${m.avgTTFTMs}`);
-  }
-  return lines.join("\n") + "\n";
+  return metricsLib.promMetrics({ startTime, cacheHits, responseCache, models });
 }
 
 // ---------------------------------------------------------------------------
