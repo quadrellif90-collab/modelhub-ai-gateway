@@ -1,6 +1,6 @@
 {
   "name": "modelhub-ai-gateway",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "private": true,
   "main": "main.js",
   "description": "Local multi-provider model aggregator with GUI control panel",
@@ -29,8 +29,10 @@
     "files": [
       "main.js",
       "server.js",
+      "server/**/*",
       "renderer/**/*",
-      "icon.png"
+      "icon.png",
+      "package.json"
     ],
     "win": {
       "target": "nsis",
