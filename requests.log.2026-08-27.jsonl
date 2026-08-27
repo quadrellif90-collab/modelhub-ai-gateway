@@ -64,3 +64,9 @@
 {"proto":"chat","reqModel":"auto","model":"p/good","ok":true,"error":"","latencyMs":1,"ttftMs":null,"promptTok":1,"completionTok":1,"totalTok":2,"cost":0.000002,"cached":false,"ts":1787827900903}
 {"proto":"chat","reqModel":"auto","model":"p/good","ok":true,"error":"","latencyMs":0,"ttftMs":null,"promptTok":1,"completionTok":1,"totalTok":2,"cost":0.000002,"cached":false,"ts":1787827900912}
 {"proto":"chat","reqModel":"auto","model":null,"ok":false,"error":"p/bad: HTTP 500","latencyMs":0,"ttftMs":null,"promptTok":0,"completionTok":0,"totalTok":0,"cost":0,"cached":false,"ts":1787827900917}
+{"proto":"chat","reqModel":"auto","model":"p/good","ok":true,"error":"","latencyMs":1,"ttftMs":null,"promptTok":1,"completionTok":1,"totalTok":2,"cost":0.000002,"cached":false,"ts":1787834577695}
+{"proto":"chat","reqModel":"auto","model":"p/good","ok":true,"error":"","latencyMs":1,"ttftMs":null,"promptTok":1,"completionTok":1,"totalTok":2,"cost":0.000002,"cached":false,"ts":1787834577704}
+{"proto":"chat","reqModel":"auto","model":null,"ok":false,"error":"p/bad: HTTP 500","latencyMs":0,"ttftMs":null,"promptTok":0,"completionTok":0,"totalTok":0,"cost":0,"cached":false,"ts":1787834577709}
+{"proto":"chat","reqModel":"auto","model":"p/good","ok":true,"error":"","latencyMs":1,"ttftMs":null,"promptTok":1,"completionTok":1,"totalTok":2,"cost":0.000002,"cached":false,"ts":1787835009519}
+{"proto":"chat","reqModel":"auto","model":"p/good","ok":true,"error":"","latencyMs":0,"ttftMs":null,"promptTok":1,"completionTok":1,"totalTok":2,"cost":0.000002,"cached":false,"ts":1787835009527}
+{"proto":"chat","reqModel":"auto","model":null,"ok":false,"error":"p/bad: HTTP 500","latencyMs":0,"ttftMs":null,"promptTok":0,"completionTok":0,"totalTok":0,"cost":0,"cached":false,"ts":1787835009533}
