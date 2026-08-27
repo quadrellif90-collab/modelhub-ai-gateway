@@ -10,3 +10,4 @@ modelhub-export-*.json
 Thumbs.db
 *.log.jsonl
 requests.log.*
+RELEASE_NOTES.md
