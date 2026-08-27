@@ -260,12 +260,9 @@ function recordRequest(entry) {
   reqLog.push(entry);
   if (reqLog.length > REQ_LOG_MAX) reqLog.shift();
   try {
-    try {
-      const st = fs.statSync(REQUEST_LOG_FILE);
-      if (st.size > 8 * 1024 * 1024) fs.renameSync(REQUEST_LOG_FILE, REQUEST_LOG_FILE + ".old");
-    } catch {}
-    fs.appendFileSync(REQUEST_LOG_FILE, JSON.stringify(entry) + "\n");
-  } catch {}
+    const path = rotatedRequestLogPath();
+    fs.appendFileSync(path, JSON.stringify(entry) + "\n");
+  } catch (e) { log("recordRequest append: " + ((e && e.message) || e)); }
 }
 
 // ---------------------------------------------------------------------------
@@ -457,7 +454,7 @@ function alertWebhook(url, event, payload) {
     }, () => {});
     req.on("error", () => {});
     req.write(body); req.end();
-  } catch {}
+  } catch (e) { log("alertWebhook req error: " + ((e && e.message) || e)); }
 }
 const alertState = {};
 function alertOnce(key, event, payload) {
@@ -533,7 +530,7 @@ function captureUsage(chunk, m, key) {
       }
       i = s.indexOf('"usage"', i + 1);
     }
-  } catch {}
+  } catch (e) { log("captureUsage parse: " + ((e && e.message) || e)); }
 }
 
 function strategyFor(profile) {
@@ -693,7 +690,7 @@ function parseRetryAfter(upRes, body) {
     const o = JSON.parse(body || "{}");
     if (typeof o.retry_after === "number") return o.retry_after * 1000;
     if (typeof o.retryAfter === "number") return o.retryAfter * 1000;
-  } catch {}
+  } catch (e) { log("parseRetryAfter parse: " + ((e && e.message) || e)); }
   return null;
 }
 
@@ -822,6 +819,39 @@ function escCh(s) {
 
 function writeSSE(res, s) { res.write("data: " + s + "\n\n"); }
 
+function makeGeminiTranslator() {
+  let model = "";
+  return {
+    onStart(res, m) { model = m; },
+    onDelta(res, text) {
+      writeSSE(res, `{"candidates":[{"content":{"parts":[{"text":"${escCh(text)}"}],"role":"model"}}]}`);
+    },
+    onDone(res, finishReason) {
+      if (finishReason) {
+        const map = { stop: "STOP", length: "MAX_TOKENS", content_filter: "SAFETY" };
+        writeSSE(res, JSON.stringify({ candidates: [{ content: { parts: [], role: "model" }, finishReason: map[finishReason] || "OTHER" }] }));
+      }
+      res.end();
+    }
+  };
+}
+
+function makeOllamaTranslator() {
+  let model = "";
+  let full = "";
+  return {
+    onStart(res, m) { model = m; full = ""; },
+    onDelta(res, text) {
+      full += text;
+      writeSSE(res, JSON.stringify({ model, message: { role: "assistant", content: text }, done: false }));
+    },
+    onDone(res) {
+      writeSSE(res, JSON.stringify({ model, message: { role: "assistant", content: full }, done: true }));
+      res.end();
+    }
+  };
+}
+
 const translators = {
   anthropic: {
     onStart(res) {
@@ -837,35 +867,13 @@ const translators = {
       res.end();
     }
   },
-  gemini: {
-    onStart(res, model) { this._model = model; },
-    onDelta(res, text) {
-      writeSSE(res, `{"candidates":[{"content":{"parts":[{"text":"${escCh(text)}"}],"role":"model"}}]}`);
-    },
-    onDone(res, finishReason) {
-      if (finishReason) {
-        const map = { stop: "STOP", length: "MAX_TOKENS", content_filter: "SAFETY" };
-        writeSSE(res, JSON.stringify({ candidates: [{ content: { parts: [], role: "model" }, finishReason: map[finishReason] || "OTHER" }] }));
-      }
-      res.end();
-    }
-  },
-  ollama: {
-    onStart(res, model) { this._model = model; this._full = ""; },
-    onDelta(res, text) {
-      this._full += text;
-      writeSSE(res, JSON.stringify({ model: this._model, message: { role: "assistant", content: text }, done: false }));
-    },
-    onDone(res) {
-      writeSSE(res, JSON.stringify({ model: this._model, message: { role: "assistant", content: this._full }, done: true }));
-      res.end();
-    }
-  }
+  gemini: () => makeGeminiTranslator(),
+  ollama: () => makeOllamaTranslator()
 };
 
 function streamWithFailover(openaiBody, res, protocol) {
   return new Promise((resolve) => {
-    const profile = (openaiBody.model && prefs.profiles[openaiBody.model]) ? openaiBody.model : "auto";
+    const profile = resolveProfile(openaiBody.model, openaiBody.messages);
     const candidates = selectCandidates(openaiBody.model, profile);
     const translator = translators[protocol];
     const makeXlat = typeof translator === "function" ? translator : () => translator;
@@ -1087,7 +1095,7 @@ function controlAuthorized(req) {
     ? req.headers["authorization"].replace(/^Bearer\s+/i, "")
     : "";
   let q = "";
-  try { q = new URL(req.url, "http://localhost").searchParams.get("token") || ""; } catch {}
+  try { q = new URL(req.url, "http://localhost").searchParams.get("token") || ""; } catch (e) { log("controlAuthorized url parse: " + ((e && e.message) || e)); }
   return h === token || auth === token || q === token;
 }
 function gatewayAuthorized(req) {
@@ -1287,7 +1295,7 @@ async function handleControl(req, res, url) {
 
   if (url === "/hub/import" && req.method === "POST") {
     let parsedInc = null;
-    try { parsedInc = await readBody(req); } catch {}
+    try { parsedInc = await readBody(req); } catch (e) { log("import readBody: " + ((e && e.message) || e)); }
     const inc = parsedInc && typeof parsedInc === "object" ? parsedInc : null;
     if (!inc || (!inc.config && !inc.prefs && !inc.keys)) return sendJSON(res, 400, { error: "nothing to import" });
     const imported = { providers: 0, keys: 0, profiles: 0 };
@@ -1606,11 +1614,37 @@ function promMetrics() {
 // ---------------------------------------------------------------------------
 const startTime = Date.now();
 const OPEN_PATHS = new Set(["/v1/models", "/models", "/api/tags", "/api/show"]);
+
+// --- rate limit per IP su API di controllo (/hub/*) ---
+const RATE_WINDOW_MS = 60_000;
+const RATE_MAX = 120;
+const rateBuckets = new Map();
+function controlRateLimited(req) {
+  if (!prefs.controlToken && !process.env.MODELHUB_TOKEN) return false; // niente token = lock disabilitato
+  const key = req.socket.remoteAddress || "unknown";
+  const now = Date.now();
+  const b = rateBuckets.get(key) || { count: 0, resetAt: now + RATE_WINDOW_MS };
+  if (now > b.resetAt) { b.count = 0; b.resetAt = now + RATE_WINDOW_MS; }
+  b.count++;
+  rateBuckets.set(key, b);
+  return b.count > RATE_MAX;
+}
+
+// --- rotazione requests.log.jsonl per data ---
+function rotatedRequestLogPath() {
+  const d = new Date();
+  const day = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+  return REQUEST_LOG_FILE.replace(/(\.jsonl)?$/, `.${day}.jsonl`);
+}
+const CSP = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'";
+
 const server = http.createServer(async (req, res) => {
   const url = req.url.split("?")[0];
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-api-key, x-modelhub-token");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Content-Security-Policy", CSP);
+  res.setHeader("X-Content-Type-Options", "nosniff");
   if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
   try {
     if (url === "/metrics") {
@@ -1618,6 +1652,7 @@ const server = http.createServer(async (req, res) => {
       return res.end(promMetrics());
     }
     if (url.startsWith("/hub/")) {
+      if (controlRateLimited(req)) return sendJSON(res, 429, { error: "rate limited" });
       if (!controlAuthorized(req)) return sendJSON(res, 401, { error: "unauthorized" });
       return await handleControl(req, res, url);
     }
@@ -1741,9 +1776,9 @@ const server = http.createServer(async (req, res) => {
             captureUsage(c, m, key);
             if (!saw) {
               const txt = c.toString("utf8");
-              if (/\"content\"\s*:\s*\"(?:\\.|[^\"\\])+/.test(txt) || /\"tool_calls\"/.test(txt)) {
+              if (/"content"\s*:\s*"(?:\\.|[^"\\])+/.test(txt) || /"tool_calls"/.test(txt)) {
                 saw = true;
-              } else if (/\"finish_reason\"\s*:\s*\"/.test(txt)) {
+              } else if (/"finish_reason"\s*:\s*"/.test(txt)) {
                 try { upRes.destroy(); } catch {}
                 return failEmpty("empty stream (no content)");
               } else {

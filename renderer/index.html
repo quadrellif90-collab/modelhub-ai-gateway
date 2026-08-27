@@ -50,16 +50,18 @@
 
     <aside class="col side">
       <section class="panel">
-        <h2>Profili &amp; ordinamento</h2>
-        <div class="row">
-          <select id="profileSelect"></select>
-        </div>
-        <div class="row">
-          <select id="strategySelect" title="Strategia di routing"></select>
-        </div>
-        <p class="hint">Strategie: order = lista manuale · cheapest = prezzo · fastest = TTFT medio · least-used = carico giornaliero · random · cascade = cheap→strong con validazione.</p>
-        <div class="row">
-          <button id="profileNew" class="btn">+ Profilo</button>
+        <h2>Profili & ordinamento</h2>
+                <div class="row">
+                  <select id="profileSelect"></select>
+                </div>
+                <div class="row">
+                  <select id="strategySelect" title="Strategia di routing"></select>
+                </div>
+                <p class="hint">Strategie: order = lista manuale · cheapest = prezzo · fastest = TTFT medio · least-used = carico giornaliero · random · cascade = cheap→strong con validazione.</p>
+                <div class="row">
+                  <button id="profileNew" class="btn">+ Profilo</button>
+                  <button id="copyCurlProfile" class="btn" title="Copia curl per il profilo selezionato">📋 curl</button>
+                </div>
           <button id="profileDel" class="btn danger">Elimina</button>
         </div>
         <p class="hint">Trascina per riordinare. Le app collegate usano il profilo come <code>model</code>.</p>

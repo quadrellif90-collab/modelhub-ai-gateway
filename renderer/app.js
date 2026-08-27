@@ -114,10 +114,12 @@ function renderProviders(s) {
 
     const head = document.createElement("div");
     head.className = "phead";
+    const healthyN = models.filter(m => m.healthy !== false).length;
     head.innerHTML = `
       <span class="chev">${collapsed ? "▸" : "▾"}</span>
       <span class="pname">${esc(p.label)}</span>
       <span class="pmeta">${models.length}${models.length !== (byProv[p.name] || []).length ? "/" + (byProv[p.name] || []).length : ""} modelli</span>
+      <span class="badge ${healthyN === models.length ? "keyok" : "nokey"}" title="${healthyN}/${models.length} modelli sani">${healthyN}/${models.length} ok</span>
       ${p.needsKey
         ? `<span class="badge ${hasKey ? "keyok" : "nokey"}">${hasKey ? "key OK" : "no key"}</span>`
         : `<span class="badge free">keyless</span>`}
@@ -182,10 +184,16 @@ function renderProviders(s) {
           <div class="minfo">${m.requests} req · ${(m.dailyTok / 1000).toFixed(1)}k tok ogg · ${speed} · ${fmtCost(m.dailyCost)} ogg</div>
         </div>
         <div class="mstat">${stat} ${verif}<br/>${m.lastError ? esc(m.lastError).slice(0, 40) : ""}</div>
+        <button class="btn mini curl" data-id="${esc(m.id)}" title="Copia comando curl di esempio">curl</button>
       `;
       row.querySelector("input").onchange = async (e) => {
         await api("/hub/toggle", "POST", { id: m.id, enabled: e.target.checked });
         poll();
+      };
+      row.querySelector(".curl").onclick = async () => {
+        const curl = buildCurl(m.id, m.free);
+        try { await navigator.clipboard.writeText(curl); } catch { /* clipboard may be blocked */ }
+        flash(`Copiato curl per ${m.id}`);
       };
       list.appendChild(row);
     }
@@ -460,6 +468,12 @@ document.getElementById("profileDel").onclick = async () => {
   if (DEFAULT_PROFILES.includes(selectedProfile)) { alert("Profili default non eliminabili."); return; }
   if (confirm("Eliminare profilo " + selectedProfile + "?")) { await api("/hub/profile/delete", "POST", { name: selectedProfile }); poll(); }
 };
+document.getElementById("copyCurlProfile").onclick = async () => {
+  const prof = selectedProfile;
+  const curl = `curl http://127.0.0.1:8787/v1/chat/completions \\\n  -H "Content-Type: application/json" \\\n  -d '{"model":"${prof}","stream":true,"messages":[{"role":"user","content":"Ciao!"}]}'`;
+  try { await navigator.clipboard.writeText(curl); } catch {}
+  flash("Copiato curl per profilo " + prof);
+};
 document.getElementById("gwSave").onclick = async () => {
   const keys = document.getElementById("gwKeys").value.split("\n").map(k => k.trim()).filter(Boolean);
   await api("/hub/gateway-keys", "POST", { keys });
@@ -601,6 +615,27 @@ document.getElementById("scanBtn").onclick = async () => {
 function esc(s) {
   return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
+
+function buildCurl(id, free) {
+  const auth = free ? "" : "\n  -H \"Authorization: Bearer $MODELHUB_KEY\"";
+  return "curl http://127.0.0.1:8787/v1/chat/completions \\\n  -H \"Content-Type: application/json\"" + auth + " \\\n  -d '{\"model\":\"" + id + "\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Ciao!\"}]}'";
+}
+
+let flashTimer = null;
+function flash(msg) {
+  let el = document.getElementById("flash");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "flash";
+    el.style.cssText = "position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#1b2330;color:#cfe;border:1px solid #2a3a4a;padding:8px 14px;border-radius:8px;z-index:99;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.4);transition:opacity .3s";
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.style.opacity = "1";
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => { el.style.opacity = "0"; }, 1800);
+}
+
 
 // theme toggle (dark/light), persisted
 (function () {

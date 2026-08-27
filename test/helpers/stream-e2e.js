@@ -49,11 +49,12 @@ async function main() {
     } catch (e) { lastErr = String(e.message || e); await new Promise(r => setTimeout(r, 250)); }
   }
   up.close();
+  await new Promise(r => setTimeout(r, 200));
 
   if (!body.includes("[DONE]")) { console.error("stream-e2e FAIL no DONE marker; lastErr=" + lastErr); process.exit(1); }
   if (!body.includes("HELLO")) { console.error("stream-e2e FAIL no content"); process.exit(1); }
   console.log("stream-e2e OK");
-  fs.rmSync(dir, { recursive: true, force: true });
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
   process.exit(0);
 }
 

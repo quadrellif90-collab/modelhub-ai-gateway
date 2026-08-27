@@ -8,11 +8,17 @@
     "start": "electron .",
     "server": "node server.js",
     "test": "node --test test/server.test.js",
+    "lint": "eslint .",
+    "format": "prettier --write \"*.js\" \"server/**/*.js\" \"renderer/*.js\" \"test/**/*.js\"",
     "dist": "electron-builder --win portable"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "electron": "^44.0.0",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "eslint": "^9.39.5",
+    "globals": "^15.15.0",
+    "prettier": "^3.9.6"
   },
   "build": {
     "appId": "local.modelhub.app",

@@ -6,17 +6,32 @@ const DIR = __dirname;
 const ICON = path.join(DIR, "icon.png");
 const SERVER_PORT = 8787;
 
-// In packaged mode, read/write the user's real installation folder
-// (C:\Users\<user>\.config\opencode\modelhub) so existing config/auth/prefs
-// and free/free-tier models persist. In source mode DIR is already that folder.
+// In packaged mode, read/write the user's data folder. Prefer the install
+// folder that actually holds the existing config/auth/prefs (so keys and
+// profiles survive), otherwise fall back to a persistent user directory
+// (C:\Users\<user>\.config\opencode\modelhub) creating it if missing.
 if (app.isPackaged) {
-  const installDir = path.join(
-    process.env.USERPROFILE || app.getPath("home"),
-    ".config", "opencode", "modelhub"
-  );
-  if (fs.existsSync(installDir)) process.env.MODELHUB_DIR = installDir;
+  const home = process.env.USERPROFILE || app.getPath("home");
+  const userDir = path.join(home, ".config", "opencode", "modelhub");
+  const candidates = [
+    userDir,
+    path.join(home, "AppData", "Local", "Programs", "ModelHub"),
+    path.dirname(process.execPath)
+  ];
+  for (const d of candidates) {
+    if (fs.existsSync(path.join(d, "config.json")) || fs.existsSync(path.join(d, "auth.json"))) {
+      process.env.MODELHUB_DIR = d;
+      break;
+    }
+  }
+  if (!process.env.MODELHUB_DIR) {
+    try { fs.mkdirSync(userDir, { recursive: true }); } catch {}
+    process.env.MODELHUB_DIR = userDir;
+  }
 }
 const PREFS_PATH = path.join(process.env.MODELHUB_DIR || DIR, "prefs.json");
+let prefs = {};
+try { prefs = JSON.parse(fs.readFileSync(PREFS_PATH, "utf8")) || {}; } catch {}
 let CTRL_TOKEN = process.env.MODELHUB_TOKEN || "";
 if (!CTRL_TOKEN) {
   try { CTRL_TOKEN = JSON.parse(fs.readFileSync(PREFS_PATH, "utf8")).controlToken || ""; } catch {}
