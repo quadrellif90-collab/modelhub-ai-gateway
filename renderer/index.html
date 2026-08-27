@@ -75,12 +75,22 @@
         <div id="pricingList" class="pricing-list"></div>
       </section>
 
-      <section class="panel">
-        <h2>Chiavi gateway</h2>
-        <p class="hint">Se definite, le API di inferenza richiedono <code>Authorization: Bearer &lt;key&gt;</code> o <code>x-api-key</code>. Una per riga, vuoto = nessuna protezione.</p>
-        <textarea id="gwKeys" placeholder="mh-key-1&#10;mh-key-2"></textarea>
-        <button id="gwSave" class="btn primary">Salva chiavi</button>
-      </section>
+            <section class="panel">
+              <h2>Import massivo chiavi provider</h2>
+              <p class="hint">Incolla un JSON <code>{ \"provider\": \"key\", ... }</code>. Sostituisce/aggiunge chiavi esistenti.</p>
+              <textarea id="bulkKeys" rows="8" placeholder='{ "openai": "sk-...", "openrouter": "sk-or-...", "groq": "gsk_..." }'></textarea>
+              <div class="row">
+                <button id="bulkImport" class="btn primary">Importa chiavi</button>
+                <span id="bulkMsg" class="msg"></span>
+              </div>
+            </section>
+
+            <section class="panel">
+              <h2>Chiavi gateway</h2>
+              <p class="hint">Se definite, le API di inferenza richiedono <code>Authorization: Bearer <key></code> o <code>x-api-key</code>. Una per riga, vuoto = nessuna protezione.</p>
+              <textarea id="gwKeys" placeholder="mh-key-1&#10;mh-key-2"></textarea>
+              <button id="gwSave" class="btn primary">Salva chiavi</button>
+            </section>
 
       <section class="panel">
         <h2>Prompt enhancer</h2>

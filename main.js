@@ -6,36 +6,30 @@ const DIR = __dirname;
 const ICON = path.join(DIR, "icon.png");
 const SERVER_PORT = 8787;
 
-// In packaged mode, read/write the user's data folder. Prefer the install
-// folder that actually holds the existing config/auth/prefs (so keys and
-// profiles survive), otherwise fall back to a persistent user directory
-// (C:\Users\<user>\.config\opencode\modelhub) creating it if missing.
-if (app.isPackaged) {
-  const home = process.env.USERPROFILE || app.getPath("home");
-  const userDir = path.join(home, ".config", "opencode", "modelhub");
-  const candidates = [
-    userDir,
-    path.join(home, "AppData", "Local", "Programs", "ModelHub"),
-    path.dirname(process.execPath)
-  ];
-  for (const d of candidates) {
-    if (fs.existsSync(path.join(d, "config.json")) || fs.existsSync(path.join(d, "auth.json"))) {
-      process.env.MODELHUB_DIR = d;
-      break;
-    }
+// Persistent data directory - use AppData on Windows
+function getDataDir() {
+  if (app.isPackaged) {
+    const home = process.env.USERPROFILE || app.getPath("home");
+    return path.join(home, "AppData", "Local", "ModelHub");
   }
-  if (!process.env.MODELHUB_DIR) {
-    try { fs.mkdirSync(userDir, { recursive: true }); } catch {}
-    process.env.MODELHUB_DIR = userDir;
-  }
+  return DIR;
 }
-const PREFS_PATH = path.join(process.env.MODELHUB_DIR || DIR, "prefs.json");
+const DATA_DIR = getDataDir();
+try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
+
+const PREFS_PATH = path.join(DATA_DIR, "prefs.json");
 let prefs = {};
 try { prefs = JSON.parse(fs.readFileSync(PREFS_PATH, "utf8")) || {}; } catch {}
 let CTRL_TOKEN = process.env.MODELHUB_TOKEN || "";
 if (!CTRL_TOKEN) {
   try { CTRL_TOKEN = JSON.parse(fs.readFileSync(PREFS_PATH, "utf8")).controlToken || ""; } catch {}
 }
+
+// Ensure config/auth/pricing use DATA_DIR
+const CONFIG_FILE = path.join(DATA_DIR, "config.json");
+const AUTH_FILE = path.join(DATA_DIR, "auth.json");
+const PRICING_FILE = path.join(DATA_DIR, "pricing.json");
+process.env.MODELHUB_DIR = DATA_DIR;
 
 process.on("uncaughtException", (e) => {
   try {
@@ -59,6 +53,7 @@ if (!fs.existsSync(ICON)) {
 let win = null;
 let tray = null;
 let widget = null;
+let isQuitting = false;
 
 function startServer() {
   try {
@@ -103,6 +98,9 @@ function showWindow() {
 }
 
 function quitApp() {
+  isQuitting = true;
+  if (widget) { widget.destroy(); widget = null; }
+  if (tray) { tray.destroy(); tray = null; }
   app.quit();
 }
 
@@ -135,7 +133,11 @@ function createWindow() {
   });
   if (!(prefs.features && prefs.features.startMinimized)) win.show();
   else win.hide();
-  win.on("close", (e) => { e.preventDefault(); win.hide(); });
+  win.on("close", (e) => {
+    if (isQuitting) return;
+    e.preventDefault();
+    win.hide();
+  });
 }
 
 function createTray() {
@@ -174,4 +176,7 @@ app.whenReady().then(() => {
   if (!launchedAtLogin) setTimeout(showWindow, 600);
 });
 
-app.on("window-all-closed", (e) => { e.preventDefault(); });
+app.on("window-all-closed", (e) => {
+  if (isQuitting) return;
+  e.preventDefault();
+});

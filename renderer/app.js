@@ -474,6 +474,18 @@ document.getElementById("copyCurlProfile").onclick = async () => {
   try { await navigator.clipboard.writeText(curl); } catch {}
   flash("Copiato curl per profilo " + prof);
 };
+document.getElementById("bulkImport").onclick = async () => {
+  const msg = document.getElementById("bulkMsg");
+  const raw = document.getElementById("bulkKeys").value.trim();
+  if (!raw) { msg.textContent = "Incolla prima un JSON."; msg.className = "msg err"; return; }
+  let obj;
+  try { obj = JSON.parse(raw); } catch (e) { msg.textContent = "JSON non valido: " + e.message; msg.className = "msg err"; return; }
+  try {
+    const r = await api("/hub/keys", "POST", obj);
+        msg.textContent = "Importate " + (r.count || Object.keys(obj).length) + " chiavi."; msg.className = "msg ok";
+        poll();
+      } catch (e) { msg.textContent = "Errore: " + e.message; msg.className = "msg err"; }
+    };
 document.getElementById("gwSave").onclick = async () => {
   const keys = document.getElementById("gwKeys").value.split("\n").map(k => k.trim()).filter(Boolean);
   await api("/hub/gateway-keys", "POST", { keys });
