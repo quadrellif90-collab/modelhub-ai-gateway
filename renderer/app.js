@@ -495,7 +495,11 @@ document.getElementById("importFile").onchange = async (e) => {
   try {
     const text = await file.text();
     const obj = JSON.parse(text);
-    const r = await api("/hub/keys", "POST", obj);
+    // Export completo (config/prefs/keys) -> /hub/import
+    // Bulk chiavi {provider: key} -> /hub/keys
+    const isFullExport = obj && (obj.config || obj.prefs || obj.keys) && typeof obj === "object";
+    const endpoint = isFullExport ? "/hub/import" : "/hub/keys";
+    const r = await api(endpoint, "POST", obj);
     flash("Import: " + JSON.stringify(r.imported || r));
     poll();
   } catch (err) { flash("Import fallito: " + err.message); }
