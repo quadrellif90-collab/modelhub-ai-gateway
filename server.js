@@ -6,6 +6,13 @@ const os = require("node:os");
 const crypto = require("node:crypto");
 const { PassThrough } = require("node:stream");
 
+const pricingLib = require("./server/pricing.js");
+const cryptoLib = require("./server/crypto.js");
+const protocolsLib = require("./server/protocols.js");
+const modelsLib = require("./server/models.js");
+const loggingLib = require("./server/logging.js");
+const routingLib = require("./server/routing.js");
+
 const PORT = parseInt(process.env.MODELHUB_PORT || "8787", 10);
 const DIR = process.env.MODELHUB_DIR || __dirname;
 const CONFIG_FILE = path.join(DIR, "config.json");
@@ -89,39 +96,7 @@ function streamSlotGive(provider) {
 // ---------------------------------------------------------------------------
 // crittografia chiavi (AES-256-GCM, key derivata dalla macchina)
 // ---------------------------------------------------------------------------
-function deriveAuthKey() {
-  const src = AUTH_KEY_ENV || `${os.hostname() || ""}:${os.userInfo().username || ""}:modelhub-v1`;
-  return crypto.createHash("sha256").update(src).digest();
-}
-function encryptAuth(obj) {
-  const key = deriveAuthKey();
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-  const json = JSON.stringify(obj);
-  const enc = Buffer.concat([cipher.update(json, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return { v: 1, iv: iv.toString("base64"), tag: tag.toString("base64"), cipher: enc.toString("base64") };
-}
-function decryptAuth(w) {
-  const key = deriveAuthKey();
-  const iv = Buffer.from(w.iv, "base64");
-  const tag = Buffer.from(w.tag, "base64");
-  const enc = Buffer.from(w.cipher, "base64");
-  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
-  decipher.setAuthTag(tag);
-  const json = Buffer.concat([decipher.update(enc), decipher.final()]);
-  return JSON.parse(json.toString("utf8"));
-}
-function looksLikeAuth(obj) {
-  if (!obj || typeof obj !== "object") return false;
-  for (const k of Object.keys(obj)) {
-    const v = obj[k];
-    if (typeof v === "string") return true;
-    if (v && typeof v === "object" && typeof v.key === "string") return true;
-    if (v && typeof v === "object" && v.v === 1 && v.iv && v.cipher) return true;
-  }
-  return false;
-}
+const { deriveAuthKey, encryptAuth, decryptAuth, looksLikeAuth } = cryptoLib;
 
 // ---------------------------------------------------------------------------
 // logging
@@ -201,11 +176,7 @@ if (!pricing || typeof pricing !== "object" || !pricing.providers) {
 }
 
 function priceFor(provider, modelName) {
-  const mk = `${provider}/${modelName}`;
-  const mo = pricing.models && pricing.models[mk];
-  if (mo && typeof mo.input === "number" && typeof mo.output === "number") return mo;
-  const po = (pricing.providers && pricing.providers[provider]) || {};
-  return { input: typeof po.input === "number" ? po.input : 0, output: typeof po.output === "number" ? po.output : 0 };
+  return pricingLib.priceFor(pricing, provider, modelName);
 }
 function effectivePrice(m) {
   if (m.free) return 0;
@@ -214,7 +185,7 @@ function effectivePrice(m) {
 }
 function computeCost(m, promptTok, completionTok) {
   const p = priceFor(m.provider, m.name);
-  return (promptTok * p.input + completionTok * p.output) / 1e6;
+  return pricingLib.computeCost(p, promptTok, completionTok);
 }
 
 // ---------------------------------------------------------------------------
@@ -315,18 +286,8 @@ function rebuildModels() {
   log(`rebuilt: ${models.length} models across ${config.providers.length} providers`);
 }
 
-function classify(id) {
-  const reasoning = /reason|r1|reasoner|thinking|\bo[13]\b|-o1-|qwq|nemotron-3-ultra|deepseek-v3|qwen-3-32b|glm-4-5/i.test(id);
-  const code = /cod(e|ing|er)|devstral|starcoder|deepseek-v3|glm-4-5|kimi-k2|minimax-m2|qwen-?2?\.?5?-?coder|qwen3-coder/i.test(id);
-  const fast = /8b|flash-lite|mini|turbo|small|lightning|nano|instant|1\.5-flash|70b-instruct|8b-instruct|qwen-turbo|solar-mini|gemma2|ministral|llama3\.1-8b/i.test(id);
-  return { reasoning, code, fast };
-}
+const { classify, classifyPrompt, catFirst, CHAT_BLOCK } = modelsLib;
 
-function catFirst(ids, pred) {
-  return [...ids.filter(id => pred(classify(id))), ...ids.filter(id => !pred(classify(id)))];
-}
-
-const CHAT_BLOCK = /guard|safeguard|content-safety|prompt-guard|moderation|moderat|align|nemo-guard|reward|classif|detect|embed|rerank|vision-only|instruct-flash-(?!chat)|reasoning-guard|jailbreak|toxicity/i;
 function isChatModel(id) {
   if (!id) return false;
   if (CHAT_BLOCK.test(id)) return false;
@@ -397,14 +358,6 @@ function keyOverLimit(key) {
   if (lim.tokens && u.tokens >= lim.tokens) return true;
   if (lim.spend && u.spent >= lim.spend) return true;
   return false;
-}
-function classifyPrompt(text) {
-  const t = String(text || "");
-  const code = /\b(code|function|def |class |import |SELECT |regex|bug|refactor|compile|script|API|endpoint|kotlin|java|python|typescript)\b/i.test(t) || /[;{}]\s*$/.test(t.trim());
-  const reasoning = /\b(why|explain|reason|step[- ]by[- ]step|prove|analyze|compare|trade[- ]?off|math|logic|plan|strategy|hypothesis)\b/i.test(t);
-  const vision = /\b(image|picture|photo|diagram|ocr|screenshot|visual)\b/i.test(t) && /(describe|read|extract|transcribe)/i.test(t);
-  const fast = t.length < 60 && !code && !reasoning;
-  return { code, reasoning, vision, fast, general: !code && !reasoning && !vision };
 }
 function resolveProfile(requested, messages) {
   if (requested && requested !== "auto" && !String(requested).startsWith("auto-intent")) return requested;
@@ -654,15 +607,7 @@ async function maybeEnhance(body, req) {
     recordRequest({ proto: "enhance", reqModel: body && body.model, model: (em && em.id) || cfg.model || "", ok: false, error: String((e && e.message) || e).slice(0, 120), latencyMs: 0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
   }
 }
-function cascadeValid(data) {
-  const c = data && data.choices && data.choices[0];
-  if (!c || !c.message) return false;
-  const msg = c.message;
-  if (typeof msg.content === "string" && msg.content.trim()) return true;
-  if (Array.isArray(msg.content) && msg.content.some(p => p.text)) return true;
-  if (msg.tool_calls && msg.tool_calls.length) return true;
-  return false;
-}
+const { cascadeValid, deriveEndpoint } = routingLib;
 
 function selectCandidates(modelId, profile) {
   if (modelId && modelMap.has(modelId) && modelMap.get(modelId).enabled) return [modelId];
@@ -804,18 +749,7 @@ async function postWithFailover(openaiBody, key) {
 // ---------------------------------------------------------------------------
 // streaming helper: failover + traduzione protocollo
 // ---------------------------------------------------------------------------
-function escCh(s) {
-  return String(s).replace(/[\\\"\u0000-\u001f]/g, c => {
-    switch (c) {
-      case "\\": return "\\\\";
-      case "\"": return "\\\"";
-      case "\n": return "\\n";
-      case "\r": return "\\r";
-      case "\t": return "\\t";
-      default: return "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0");
-    }
-  });
-}
+const { escCh } = loggingLib;
 
 function writeSSE(res, s) { res.write("data: " + s + "\n\n"); }
 
@@ -1013,76 +947,7 @@ function streamWithFailover(openaiBody, res, protocol) {
 // ---------------------------------------------------------------------------
 // protocol adapters (entrante -> OpenAI; uscente OpenAI -> protocollo)
 // ---------------------------------------------------------------------------
-function anthropicToOpenAI(body) {
-  const messages = [];
-  if (body.system) messages.push({ role: "system", content: body.system });
-  for (const msg of (body.messages || [])) {
-    messages.push({ role: msg.role === "assistant" ? "assistant" : "user", content: msg.content });
-  }
-  return {
-    model: body.model,
-    messages,
-    max_tokens: body.max_tokens || 1024,
-    temperature: body.temperature,
-    stream: body.stream === true,
-    stop: body.stop
-  };
-}
-function openAIToAnthropic(data, model) {
-  const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
-  const usage = data.usage || {};
-  return {
-    id: data.id || "msg_" + Date.now(),
-    type: "message",
-    role: "assistant",
-    model: model,
-    stop_reason: "end_turn",
-    content: [{ type: "text", text }],
-    usage: { input_tokens: usage.prompt_tokens || 0, output_tokens: usage.completion_tokens || 0 }
-  };
-}
-function geminiGenerateToOpenAI(model, body) {
-  const messages = [];
-  for (const c of (body.contents || [])) {
-    const role = c.role === "model" ? "assistant" : "user";
-    const text = (c.parts || []).map(p => p.text || "").join("");
-    messages.push({ role, content: text });
-  }
-  return {
-    model,
-    messages,
-    max_tokens: (body.generationConfig && body.generationConfig.maxOutputTokens) || 1024,
-    stream: body.generationConfig && body.generationConfig.stream === true,
-    temperature: body.generationConfig && body.generationConfig.temperature
-  };
-}
-function openAIToGemini(data, finishReason) {
-  const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
-  const usage = data.usage || {};
-  const map = { stop: "STOP", length: "MAX_TOKENS", content_filter: "SAFETY" };
-  const fr = finishReason ? map[finishReason] || "OTHER" : undefined;
-  return {
-    candidates: [{ content: { parts: [{ text }], role: "model" }, ...(fr ? { finishReason: fr } : {}) }],
-    usageMetadata: { promptTokenCount: usage.prompt_tokens || 0, candidatesTokenCount: usage.completion_tokens || 0 }
-  };
-}
-function ollamaChatToOpenAI(body) {
-  return {
-    model: body.model,
-    messages: body.messages || [],
-    stream: body.stream === true,
-    max_tokens: (body.options && body.options.num_predict) || 1024,
-    temperature: body.options && body.options.temperature
-  };
-}
-function openAIToOllama(data, model) {
-  const text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
-  return {
-    model,
-    message: { role: "assistant", content: text },
-    done: true
-  };
-}
+const { anthropicToOpenAI, openAIToAnthropic, geminiGenerateToOpenAI, openAIToGemini, ollamaChatToOpenAI, openAIToOllama } = protocolsLib;
 
 // ---------------------------------------------------------------------------
 // auth
@@ -1114,10 +979,6 @@ function gatewayAuthorized(req) {
 // ---------------------------------------------------------------------------
 // upstream helpers (discovery / embeddings)
 // ---------------------------------------------------------------------------
-function deriveEndpoint(baseURL, name) {
-  if (/chat\/completions\/?$/.test(baseURL)) return baseURL.replace(/chat\/completions\/?$/, name);
-  return baseURL.replace(/\/+$/, "") + "/" + name;
-}
 function fetchJSON(targetURL, apiKey) {
   return new Promise((resolve, reject) => {
     let u;

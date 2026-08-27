@@ -62,6 +62,11 @@
                   <button id="profileNew" class="btn">+ Profilo</button>
                   <button id="copyCurlProfile" class="btn" title="Copia curl per il profilo selezionato">📋 curl</button>
                 </div>
+                <div class="row">
+                  <button id="exportConfig" class="btn" title="Scarica config+chiavi+profili come JSON">⬇ Export</button>
+                  <button id="importConfig" class="btn" title="Carica un export JSON">⬆ Import</button>
+                  <input type="file" id="importFile" accept="application/json" hidden />
+                </div>
           <button id="profileDel" class="btn danger">Elimina</button>
         </div>
         <p class="hint">Trascina per riordinare. Le app collegate usano il profilo come <code>model</code>.</p>

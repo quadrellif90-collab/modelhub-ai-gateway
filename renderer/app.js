@@ -474,6 +474,34 @@ document.getElementById("copyCurlProfile").onclick = async () => {
   try { await navigator.clipboard.writeText(curl); } catch {}
   flash("Copiato curl per profilo " + prof);
 };
+document.getElementById("exportConfig").onclick = async () => {
+  try {
+    const blob = await api("/hub/export", "GET");
+    const url = URL.createObjectURL(new Blob([JSON.stringify(blob, null, 2)], { type: "application/json" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `modelhub-export-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    flash("Config esportata");
+  } catch (e) { flash("Export fallito: " + e.message); }
+};
+document.getElementById("importConfig").onclick = () => {
+  document.getElementById("importFile").click();
+};
+document.getElementById("importFile").onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const obj = JSON.parse(text);
+    const r = await api("/hub/import", "POST", obj);
+    flash("Import: " + JSON.stringify(r.imported || r));
+    poll();
+  } catch (err) { flash("Import fallito: " + err.message); }
+  e.target.value = "";
+};
+
 document.getElementById("bulkImport").onclick = async () => {
   const msg = document.getElementById("bulkMsg");
   const raw = document.getElementById("bulkKeys").value.trim();
