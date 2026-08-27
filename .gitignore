@@ -8,3 +8,5 @@ prefs.local.json
 modelhub-export-*.json
 .DS_Store
 Thumbs.db
+*.log.jsonl
+requests.log.*
