@@ -1313,6 +1313,21 @@ async function handleControl(req, res, url) {
       const keys = (prefs.gatewayKeys || []).map(k => ({ key: k, limit: keyLimit(k), used: keyUsed(k) }));
       return sendJSON(res, 200, { keys });
     }
+    // Bulk import provider keys: { "openai": "sk-...", "anthropic": "sk-...", ... }
+    if (body && typeof body === "object" && Object.keys(body).some(k => k !== "key" && k !== "tokens" && k !== "spend")) {
+      let count = 0;
+      for (const [provider, key] of Object.entries(body)) {
+        if (provider === "key" || provider === "tokens" || provider === "spend") continue;
+        if (typeof key !== "string" || !key.trim()) continue;
+        auth[provider] = key.trim();
+        count++;
+      }
+      if (count > 0) {
+        writeAuth(auth);
+        log("imported " + count + " provider keys via /hub/keys");
+        return sendJSON(res, 200, { ok: true, count, imported: { keys: count } });
+      }
+    }
     const k = body.key || (prefs.gatewayKeys && prefs.gatewayKeys[0]) || null;
     if (!k) return sendJSON(res, 400, { error: "no gateway key" });
     prefs.keylimits = prefs.keylimits || {};

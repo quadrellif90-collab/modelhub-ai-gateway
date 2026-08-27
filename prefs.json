@@ -159,7 +159,6 @@
       "kilocode/~anthropic/claude-fable-latest",
       "kilocode/anthropic/claude-fable-5",
       "kilocode/nex-agi/nex-n2-pro",
-      "kilocode/nvidia/nemotron-3-ultra-550b-a55b",
       "kilocode/nvidia/nemotron-3-ultra-550b-a55b:free",
       "kilocode/qwen/qwen3.7-plus",
       "kilocode/minimax/minimax-m3:free",
@@ -1421,7 +1420,10 @@
       "huggingface/ibm-granite/granite-4.2-30b",
       "huggingface/ibm-granite/granite-4.2-3b",
       "huggingface/ibm-granite/granite-4.2-8b",
-      "novita/inclusionai/ling-3.0-flash-fin"
+      "novita/inclusionai/ling-3.0-flash-fin",
+      "kilocode/thinkingmachines/inkling-small",
+      "kilocode/thinkingmachines/inkling",
+      "kilocode/nvidia/nemotron-3-ultra-550b-a55b"
     ],
     "auto-code": [
       "zen/gpt-5.3-codex-spark",
@@ -1509,7 +1511,6 @@
       "kilocode/~anthropic/claude-fable-latest",
       "kilocode/anthropic/claude-fable-5",
       "kilocode/nex-agi/nex-n2-pro",
-      "kilocode/nvidia/nemotron-3-ultra-550b-a55b",
       "kilocode/nvidia/nemotron-3-ultra-550b-a55b:free",
       "kilocode/qwen/qwen3.7-plus",
       "kilocode/minimax/minimax-m3:free",
@@ -2827,7 +2828,10 @@
       "huggingface/ibm-granite/granite-4.2-30b",
       "huggingface/ibm-granite/granite-4.2-3b",
       "huggingface/ibm-granite/granite-4.2-8b",
-      "novita/inclusionai/ling-3.0-flash-fin"
+      "novita/inclusionai/ling-3.0-flash-fin",
+      "kilocode/thinkingmachines/inkling-small",
+      "kilocode/thinkingmachines/inkling",
+      "kilocode/nvidia/nemotron-3-ultra-550b-a55b"
     ],
     "auto-reasoning": [
       "nvidia/nvidia/nemotron-3-ultra-550b-a55b",
@@ -2835,7 +2839,6 @@
       "zen/nemotron-3-ultra-free",
       "kilocode/thinkingmachines/inkling-small:free",
       "kilocode/thinkingmachines/inkling:free",
-      "kilocode/nvidia/nemotron-3-ultra-550b-a55b",
       "kilocode/nvidia/nemotron-3-ultra-550b-a55b:free",
       "kilocode/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
       "kilocode/arcee-ai/trinity-large-thinking",
@@ -4233,7 +4236,10 @@
       "huggingface/ibm-granite/granite-4.2-30b",
       "huggingface/ibm-granite/granite-4.2-3b",
       "huggingface/ibm-granite/granite-4.2-8b",
-      "novita/inclusionai/ling-3.0-flash-fin"
+      "novita/inclusionai/ling-3.0-flash-fin",
+      "kilocode/thinkingmachines/inkling-small",
+      "kilocode/thinkingmachines/inkling",
+      "kilocode/nvidia/nemotron-3-ultra-550b-a55b"
     ],
     "auto-fast": [
       "upstage/solar-mini",
@@ -4709,7 +4715,6 @@
       "kilocode/~anthropic/claude-fable-latest",
       "kilocode/anthropic/claude-fable-5",
       "kilocode/nex-agi/nex-n2-pro",
-      "kilocode/nvidia/nemotron-3-ultra-550b-a55b",
       "kilocode/nvidia/nemotron-3-ultra-550b-a55b:free",
       "kilocode/qwen/qwen3.7-plus",
       "kilocode/stepfun/step-3.7-flash",
@@ -5639,7 +5644,10 @@
       "google/models/lyria-realtime-exp",
       "huggingface/ibm-granite/granite-4.2-30b",
       "huggingface/ibm-granite/granite-4.2-3b",
-      "novita/inclusionai/ling-3.0-flash-fin"
+      "novita/inclusionai/ling-3.0-flash-fin",
+      "kilocode/thinkingmachines/inkling-small",
+      "kilocode/thinkingmachines/inkling",
+      "kilocode/nvidia/nemotron-3-ultra-550b-a55b"
     ],
     "free-pool": [
       "upstage/solar-pro4",
@@ -5783,7 +5791,6 @@
       "kilocode/~anthropic/claude-fable-latest",
       "kilocode/anthropic/claude-fable-5",
       "kilocode/nex-agi/nex-n2-pro",
-      "kilocode/nvidia/nemotron-3-ultra-550b-a55b",
       "kilocode/nvidia/nemotron-3-ultra-550b-a55b:free",
       "kilocode/qwen/qwen3.7-plus",
       "kilocode/minimax/minimax-m3:free",
@@ -6992,7 +6999,10 @@
       "novita/meta-llama/llama-3.2-1b-instruct",
       "novita/meta-llama/llama-3.2-3b-instruct",
       "novita/sao10k/l31-70b-euryale-v2.2",
-      "novita/qwen/qwen-2-7b-instruct"
+      "novita/qwen/qwen-2-7b-instruct",
+      "kilocode/thinkingmachines/inkling-small",
+      "kilocode/thinkingmachines/inkling",
+      "kilocode/nvidia/nemotron-3-ultra-550b-a55b"
     ]
   },
   "gatewayKeys": []

@@ -495,7 +495,7 @@ document.getElementById("importFile").onchange = async (e) => {
   try {
     const text = await file.text();
     const obj = JSON.parse(text);
-    const r = await api("/hub/import", "POST", obj);
+    const r = await api("/hub/keys", "POST", obj);
     flash("Import: " + JSON.stringify(r.imported || r));
     poll();
   } catch (err) { flash("Import fallito: " + err.message); }
@@ -510,10 +510,10 @@ document.getElementById("bulkImport").onclick = async () => {
   try { obj = JSON.parse(raw); } catch (e) { msg.textContent = "JSON non valido: " + e.message; msg.className = "msg err"; return; }
   try {
     const r = await api("/hub/keys", "POST", obj);
-        msg.textContent = "Importate " + (r.count || Object.keys(obj).length) + " chiavi."; msg.className = "msg ok";
-        poll();
-      } catch (e) { msg.textContent = "Errore: " + e.message; msg.className = "msg err"; }
-    };
+    msg.textContent = "Importate " + (r.count || Object.keys(obj).length) + " chiavi."; msg.className = "msg ok";
+    poll();
+  } catch (e) { msg.textContent = "Errore: " + e.message; msg.className = "msg err"; }
+};
 document.getElementById("gwSave").onclick = async () => {
   const keys = document.getElementById("gwKeys").value.split("\n").map(k => k.trim()).filter(Boolean);
   await api("/hub/gateway-keys", "POST", { keys });
