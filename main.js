@@ -140,7 +140,7 @@ function setupAutoUpdate() {
 
 function createWindow() {
   win = new BrowserWindow({
-    width: 1180, height: 760, show: true,
+    width: 1180, height: 760, show: false,
     icon: ICON,
     webPreferences: { nodeIntegration: false, contextIsolation: true }
   });
@@ -163,6 +163,7 @@ function createWindow() {
   });
   // Avvio ridotto: se startMinimized è true, parte solo in tray
   if (prefs.features && prefs.features.startMinimized) win.hide();
+  else win.show();
   win.on("close", (e) => {
     if (isQuitting) return;
     e.preventDefault();
@@ -205,6 +206,7 @@ app.whenReady().then(() => {
   createTray();
   createWidget();
   setupAutoUpdate();
+  if (!launchedAtLogin) setTimeout(showWindow, 600);
 });
 
 app.on("window-all-closed", (e) => {

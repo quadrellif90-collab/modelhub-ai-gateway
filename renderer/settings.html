@@ -92,7 +92,6 @@
   </div>
 
   <footer>
-    <button class="btn sec" id="openPanel">Apri pannello</button>
     <button class="btn" id="save">Salva</button>
   </footer>
   <div class="hint" id="status"></div>
@@ -101,54 +100,60 @@
     const TOKEN = new URLSearchParams(location.search).get("t") || "";
     const BASE = "http://127.0.0.1:8787";
     async function api(p, m, b) {
-      const r = await fetch(BASE + p, { method: m || "GET", headers: { "content-type": "application/json", "x-modelhub-token": TOKEN }, body: b ? JSON.stringify(b) : undefined });
-      try { return await r.json(); } catch { return null; }
+      try {
+        const r = await fetch(BASE + p, { method: m || "GET", headers: { "content-type": "application/json", "x-modelhub-token": TOKEN }, body: b ? JSON.stringify(b) : undefined });
+        let j = null; try { j = await r.json(); } catch {}
+        return { ok: r.ok, status: r.status, json: j };
+      } catch (e) { return { ok: false, status: 0, error: String(e), json: null }; }
     }
     const $ = (id) => document.getElementById(id);
-    const set = (id, v) => { $(id).checked = !!v; };
+    const set = (id, v) => { const el = $(id); if (el) el.checked = !!v; };
+    const status = (msg, bad) => { const s = $("status"); if (s) { s.textContent = msg; s.className = "hint " + (bad ? "bad" : "ok"); } };
 
     async function load() {
       const s = await api("/hub/state");
-      if (!s) { $("status").textContent = "server non raggiungibile"; return; }
-      const f = s.features || {};
-      const mf = s.modelFilter || {};
-      // avvio automatico (da main, non dallo state: lo chiediamo a parte)
+      if (!s.ok || !s.json) { status("server non raggiungibile", true); return; }
+      const j = s.json;
+      const f = j.features || {};
+      const mf = j.modelFilter || {};
       set("featCache", f.cache);
       set("featProbe", f.autoProbe);
       set("featFallback", f.smartFallback);
       set("mfExcludePaid", mf.excludePaid);
       set("mfFreeOnly", mf.freeProvidersOnly);
       set("mfAutoExclude", mf.autoExcludeNonFree);
-      $("dailyLimit").value = (mf.dailyLimit || 0);
-      $("port").value = (s.port || 8787);
-      // tema
+      const dl = $("dailyLimit"); if (dl) dl.value = (mf.dailyLimit || 0);
+      const pt = $("port"); if (pt) pt.value = (j.port || 8787);
       try { set("themeLight", localStorage.getItem("mh-theme") === "light"); } catch {}
-      // startMinimized
-      try { set("startMin", !!(s.features && s.features.startMinimized)); } catch {}
+      try { set("startMin", !!(j.features && j.features.startMinimized)); } catch {}
     }
 
     async function save() {
+      const results = [];
       const f = {
         cache: $("featCache").checked,
         autoProbe: $("featProbe").checked,
         smartFallback: $("featFallback").checked,
+        startMinimized: $("startMin").checked,
       };
-      await api("/hub/features", "POST", f);
-      await api("/hub/model-filter", "POST", {
+      results.push(await api("/hub/features", "POST", f));
+      results.push(await api("/hub/model-filter", "POST", {
         excludePaid: $("mfExcludePaid").checked,
         freeProvidersOnly: $("mfFreeOnly").checked,
         autoExcludeNonFree: $("mfAutoExclude").checked,
         dailyLimit: Number($("dailyLimit").value) || 0,
-      });
+      }));
       try { localStorage.setItem("mh-theme", $("themeLight").checked ? "light" : "dark"); } catch {}
-      // startMinimized via features (se supportato)
-      await api("/hub/features", "POST", { startMinimized: $("startMin").checked });
-      $("status").textContent = "✓ Salvato";
-      setTimeout(() => { $("status").textContent = ""; }, 2000);
+      const failed = results.filter(r => !r.ok);
+      if (failed.length) {
+        status("Errore salvataggio (" + failed.map(r => r.status || r.error).join(", ") + ")", true);
+      } else {
+        status("✓ Salvato", false);
+        setTimeout(() => status(""), 2000);
+      }
     }
 
     $("save").onclick = save;
-    $("openPanel").onclick = () => { try { window.opener && window.opener.focus(); } catch {} };
     load();
   </script>
 </body>
