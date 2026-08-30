@@ -11,6 +11,8 @@ export default [
       globals: {
         ...globals.node,
         ...globals.browser,
+        // Electron app lifecycle variable shared across main.js functions
+        launchedAtLogin: "writable",
       },
     },
     rules: {

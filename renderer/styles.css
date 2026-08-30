@@ -95,11 +95,11 @@ textarea { min-height: 64px; resize: vertical; font-family: monospace; }
 .check input { width: auto; }
 .hint { color: var(--muted); font-size: 11px; line-height: 1.5; margin: 6px 0; }
 code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-size: 11px; }
-/* Vista compatta provider/modelli */
-.providers.compact .provider { padding: 7px 10px; margin-bottom: 7px; }
-.providers.compact .model { padding: 3px 4px; }
-.providers.compact .models { margin-top: 5px; }
-.providers.compact .pmeta { display: none; }
+/* Vista compatta provider/modelli (toggle "Compatta") */
+#providers.compact .provider { padding: 7px 10px; margin-bottom: 7px; }
+#providers.compact .model { padding: 3px 4px; }
+#providers.compact .models { margin-top: 5px; }
+#providers.compact .pmeta { display: none; }
 .row { display: flex; gap: 6px; margin-bottom: 8px; align-items: center; }
 .msg { color: var(--green); font-size: 11px; }
 
