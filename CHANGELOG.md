@@ -3,6 +3,12 @@
 Tutte le modifiche rilevanti a ModelHub sono documentate qui.
 Il formato segue [Keep a Changelog](https://keepachangelog.com/) e il versioning segue [Semantic Versioning](https://semver.org/).
 
+## [0.7.5] - 2026-08-30
+
+### Fixed
+- **Finestra dell'app non si apriva**: `main.js` dichiarava `const launchedAtLogin` DOPO `createWindow()`, causando un ReferenceError (TDZ) che mandava in crash la creazione della finestra — l'app girava solo come processo nascosto (nessuna UI visibile). Ora la variabile è dichiarata prima di `createWindow()`.
+- **Avvio sempre in tray**: con `features.startMinimized:true` persistito, ogni lancio era invisibile. Ora la finestra si apre sempre al lancio manuale; il solo avvio da login con `startMinimized` va in tray.
+
 ## [0.7.4] - 2026-08-30
 
 ### Added
