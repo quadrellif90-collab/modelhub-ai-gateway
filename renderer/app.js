@@ -243,7 +243,9 @@ bindToolbar();
 
 function renderProfiles(s) {
   const sel = document.getElementById("profileSelect");
-  const cur = sel.value || selectedProfile;
+  // Usa sempre la selezione corrente (variabile globale) per evitare race
+  // con il poll() che sovrascriverebbe sel.value.
+  const cur = selectedProfile;
   sel.innerHTML = "";
   for (const name of s.profiles) {
     const o = document.createElement("option");
@@ -251,8 +253,15 @@ function renderProfiles(s) {
     sel.appendChild(o);
   }
   if ([...s.profiles].includes(cur)) sel.value = cur;
-  selectedProfile = sel.value;
-  profileOrder = (s.profileOrder && s.profileOrder[selectedProfile]) ? s.profileOrder[selectedProfile].slice() : [];
+  // Non sovrascrivere la scelta dell'utente durante il poll: mantieni selectedProfile
+  // a meno che il profilo corrente non esista più nello state.
+  if (![...s.profiles].includes(selectedProfile)) selectedProfile = sel.value;
+  // Fallback: se il profilo non ha un ordine esplicito, usa i modelli abilitati
+  let order = (s.profileOrder && s.profileOrder[selectedProfile]) ? s.profileOrder[selectedProfile].slice() : [];
+  if (!order.length && Array.isArray(s.models)) {
+    order = s.models.filter(m => m.enabled).map(m => m.id);
+  }
+  profileOrder = order;
 
   const stSel = document.getElementById("strategySelect");
   stSel.innerHTML = "";
@@ -506,7 +515,13 @@ function enableDrag(ol) {
   });
 }
 
-document.getElementById("profileSelect").onchange = (e) => { selectedProfile = e.target.value; renderProfiles(STATE); };
+document.getElementById("profileSelect").onchange = (e) => {
+  selectedProfile = e.target.value;
+  try { localStorage.setItem("mh-profile", selectedProfile); } catch {}
+  renderProfiles(STATE);
+};
+// ripristina l'ultimo profilo selezionato
+try { const sp = localStorage.getItem("mh-profile"); if (sp) selectedProfile = sp; } catch {}
 document.getElementById("strategySelect").onchange = async (e) => {
   await api("/hub/strategy", "POST", { profile: selectedProfile, strategy: e.target.value });
 };

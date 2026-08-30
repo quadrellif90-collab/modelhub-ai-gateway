@@ -388,26 +388,29 @@ function isChatModel(id) {
   return !CHAT_BLOCK.test(m.label || "") && !CHAT_BLOCK.test(m.name || "");
 }
 
-function mergedOrder(manualArr, generated, enabledSet) {
+function mergedOrder(manualArr, generated, enabledSet, strict) {
   const kept = (manualArr || []).filter(id => enabledSet.has(id) && modelMap.has(id));
   const seen = new Set(kept);
   const appended = generated.filter(id => !seen.has(id));
+  // strict=true: il profilo contiene SOLO i modelli del sottoinsieme generato
+  // (es. auto-code = solo modelli code), non tutti i modelli abilitati.
+  if (strict) return kept.concat(appended).filter(id => enabledSet.has(id));
   return kept.concat(appended);
 }
 function rebuildProfiles() {
   const enabledIds = models.filter(m => m.enabled && isChatModel(m.id)).map(m => m.id);
   const enabledSet = new Set(enabledIds);
   const scored = enabledIds.slice().sort((a, b) => autorouteScore(b) - autorouteScore(a));
-  const defaultMerge = (prof, generated) => {
+  const defaultMerge = (prof, generated, strict) => {
     const arr = prefs.profiles[prof];
     const base = (Array.isArray(arr) && arr.length) ? arr : generated;
-    prefs.profiles[prof] = mergedOrder(base, generated, enabledSet);
+    prefs.profiles[prof] = mergedOrder(base, generated, enabledSet, strict);
   };
-  defaultMerge("auto", scored);
-  defaultMerge("auto-code", catFirst(scored, c => c.code));
-  defaultMerge("auto-reasoning", catFirst(scored, c => c.reasoning));
-  defaultMerge("auto-fast", catFirst(scored, c => c.fast));
-  defaultMerge("free-pool", buildFreePool());
+  defaultMerge("auto", scored, false);
+  defaultMerge("auto-code", catFirst(scored, c => c.code), true);
+  defaultMerge("auto-reasoning", catFirst(scored, c => c.reasoning), true);
+  defaultMerge("auto-fast", catFirst(scored, c => c.fast), true);
+  defaultMerge("free-pool", buildFreePool(), true);
   for (const prof of Object.keys(prefs.profiles)) {
     if (["auto", "auto-code", "auto-reasoning", "auto-fast", "free-pool"].includes(prof)) continue;
     const arr = prefs.profiles[prof];
