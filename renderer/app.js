@@ -526,6 +526,22 @@ document.getElementById("settingsBtn").onclick = () => {
   // instradato dal main.js (setWindowOpenHandler -> createSettingsWindow)
   window.open("modelhub://settings");
 };
+// Toggle sidebar laterale (nascosta di default)
+(function () {
+  const layout = document.querySelector(".layout");
+  const side = document.getElementById("sidebar");
+  const btn = document.getElementById("sidebarToggle");
+  const KEY = "mh-sidebar";
+  function apply(on) {
+    if (on) { layout.classList.add("with-side"); side.classList.remove("hidden"); }
+    else { layout.classList.remove("with-side"); side.classList.add("hidden"); }
+    try { localStorage.setItem(KEY, on ? "1" : "0"); } catch {}
+  }
+  let on = false;
+  try { on = localStorage.getItem(KEY) !== "0"; } catch {}
+  apply(on);
+  btn.onclick = () => apply(!layout.classList.contains("with-side"));
+})();
 document.getElementById("strategySelect").onchange = async (e) => {
   await api("/hub/strategy", "POST", { profile: selectedProfile, strategy: e.target.value });
 };
