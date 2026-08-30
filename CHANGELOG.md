@@ -3,7 +3,21 @@
 Tutte le modifiche rilevanti a ModelHub sono documentate qui.
 Il formato segue [Keep a Changelog](https://keepachangelog.com/) e il versioning segue [Semantic Versioning](https://semver.org/).
 
-## [0.7.5] - 2026-08-30
+## [0.7.7] - 2026-08-30
+
+### Added
+- **Filtri modelli configurabili** (`prefs.modelFilter`): `excludePaid`, `freeProvidersOnly`, `autoExcludeNonFree`, `blacklist` (esclusione manuale `provider:modello`), `whitelist`. Applicati in `rebuildModels()` e persistiti via API `/hub/model-filter`.
+- **Pannello "Filtri modelli" nella UI**: toggle per i filtri, smart fallback, gestione blacklist (aggiungi/rimuovi/ripristina tutti).
+- **Metadati modelli arricchiti**: ogni modello espone `isFree`, `contextLength`, `architecture`, `modalities`, `updatedAt`, `freeLimit` (visibili in `/hub/state` e nella tabella UI con badge FREE/PAID + contesto/architettura/modalità).
+- **Smart fallback su 429**: se `features.smartFallback` è attivo, al ricevere `429` da un modello il router passa automaticamente a un modello libero con stessa architettura/contesto, loggando il fallback.
+- **Modelli free con metadati** per provider gratuiti (Groq, Together, Fireworks, Lepton, Cohere, Perplexity, OpenRouter, Gemini, Anthropic, OpenAI, Kilocode) — nessuna API key hard-coded.
+- **Endpoint `/hub/model-filter` e `/hub/model-filter/blacklist`** per salvare/gestire i filtri da UI o API.
+
+### Changed
+- `featuresCfg()` espone ora `smartFallback`.
+- `controlState()` include `modelFilter` e i nuovi campi metadati nei `models`.
+
+## [0.7.6] - 2026-08-30
 
 ### Fixed
 - **Finestra dell'app non si apriva**: `main.js` dichiarava `const launchedAtLogin` DOPO `createWindow()`, causando un ReferenceError (TDZ) che mandava in crash la creazione della finestra — l'app girava solo come processo nascosto (nessuna UI visibile). Ora la variabile è dichiarata prima di `createWindow()`.
