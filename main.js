@@ -57,7 +57,9 @@ let isQuitting = false;
 
 function startServer() {
   try {
-    const hub = require(path.join(DIR, "server.js"));
+    // I moduli dell'app (server.js + server/*) stanno in __dirname (cartella
+    // dell'app), NON in MODELHUB_DIR (che è la cartella dati utente).
+    const hub = require(path.join(__dirname, "server.js"));
     if (typeof hub.startHub === "function") hub.startHub();
   } catch (e) {
     console.error("hub start failed:", e);
