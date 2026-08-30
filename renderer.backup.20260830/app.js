@@ -76,8 +76,6 @@ function render(s) {
   renderFeatures(s);
   renderSettings(s);
   renderLeaderboard(s);
-  renderStats(s);
-  renderLogs((STATE && STATE.logs) || (s.logs) || []);
   const ci = document.getElementById("cacheInfo");
   ci.textContent = s.cache.enabled
     ? `${s.cache.size} voci in cache · ${s.cache.hits} hit · TTL ${Math.round(s.cache.ttlMs / 1000)}s`
@@ -453,32 +451,6 @@ function classifyLabel(id) {
   return "general";
 }
 
-function toast(msg, isErr) {
-  const el = document.getElementById("toast");
-  if (!el) return;
-  el.textContent = msg;
-  el.className = "toast show" + (isErr ? " err" : "");
-  clearTimeout(toast._t);
-  toast._t = setTimeout(() => { el.className = "toast"; }, 2600);
-}
-
-function renderStats(s) {
-  const grid = document.getElementById("statsGrid");
-  if (!grid) return;
-  const t = s.totals || {};
-  const cards = [
-    { v: (s.models || []).length, l: "Modelli totali" },
-    { v: (s.providers || []).length, l: "Provider" },
-    { v: t.healthy != null ? t.healthy : "–", l: "Modelli sani" },
-    { v: t.req != null ? t.req : "–", l: "Richieste oggi" },
-    { v: t.tok != null ? (t.tok / 1000).toFixed(1) + "k" : "–", l: "Token oggi" },
-    { v: t.cost != null ? (t.cost < 0.01 ? "$" + t.cost.toFixed(4) : "$" + t.cost.toFixed(2)) : "–", l: "Costo oggi" },
-    { v: (s.profiles || []).length, l: "Profili" },
-    { v: (s.enhancer && s.enhancer.enabled) ? "ON" : "OFF", l: "Enhancer" },
-  ];
-  grid.innerHTML = cards.map(c => `<div class="stat-card"><div class="v">${c.v}</div><div class="l">${c.l}</div></div>`).join("");
-}
-
 function renderLogs(logs) {
   const tbody = document.getElementById("logRows");
   if (!logs.length) {
@@ -554,41 +526,27 @@ document.getElementById("settingsBtn").onclick = () => {
   // instradato dal main.js (setWindowOpenHandler -> createSettingsWindow)
   window.open("modelhub://settings");
 };
-// Drawer laterale (slide-in) — sostituisce la vecchia sidebar
+// Toggle sidebar laterale (nascosta di default)
 (function () {
-  const drawer = document.getElementById("drawer");
-  const overlay = document.getElementById("drawerOverlay");
-  const btn = document.getElementById("drawerToggle");
-  const close = document.getElementById("drawerClose");
-  const KEY = "mh-drawer";
+  const layout = document.querySelector(".layout");
+  const side = document.getElementById("sidebar");
+  const btn = document.getElementById("sidebarToggle");
+  const KEY = "mh-sidebar";
   function apply(on) {
-    drawer.classList.toggle("open", on);
-    overlay.classList.toggle("open", on);
+    if (on) { layout.classList.add("with-side"); side.classList.remove("hidden"); }
+    else { layout.classList.remove("with-side"); side.classList.add("hidden"); }
     try { localStorage.setItem(KEY, on ? "1" : "0"); } catch {}
   }
   let on = false;
-  try { on = localStorage.getItem(KEY) === "1"; } catch {}
+  try { on = localStorage.getItem(KEY) !== "0"; } catch {}
   apply(on);
-  btn.onclick = () => apply(!drawer.classList.contains("open"));
-  close.onclick = () => apply(false);
-  overlay.onclick = () => apply(false);
-})();
-// Tabs attività (leader / recent / stats)
-(function () {
-  const tabs = document.querySelectorAll(".tab");
-  tabs.forEach(t => t.onclick = () => {
-    tabs.forEach(x => x.classList.remove("active"));
-    t.classList.add("active");
-    document.querySelectorAll(".tab-body").forEach(b => b.classList.add("hidden"));
-    document.getElementById("tab-" + t.dataset.tab).classList.remove("hidden");
-  });
+  btn.onclick = () => apply(!layout.classList.contains("with-side"));
 })();
 document.getElementById("strategySelect").onchange = async (e) => {
   await api("/hub/strategy", "POST", { profile: selectedProfile, strategy: e.target.value });
 };
 document.getElementById("saveOrder").onclick = async () => {
   await api("/hub/reorder", "POST", { profile: selectedProfile, order: profileOrder });
-  toast("Ordine profilo salvato ✓");
   poll();
 };
 document.getElementById("profileNew").onclick = async () => {
@@ -646,9 +604,8 @@ document.getElementById("bulkImport").onclick = async () => {
   try {
     const r = await api("/hub/keys", "POST", obj);
     msg.textContent = "Importate " + (r.count || Object.keys(obj).length) + " chiavi."; msg.className = "msg ok";
-    toast("Importate " + (r.count || Object.keys(obj).length) + " chiavi ✓");
     poll();
-  } catch (e) { msg.textContent = "Errore: " + e.message; msg.className = "msg err"; toast("Errore import: " + e.message, true); }
+  } catch (e) { msg.textContent = "Errore: " + e.message; msg.className = "msg err"; }
 };
 document.getElementById("gwMint").onclick = async () => {
   const label = document.getElementById("gwLabel").value.trim();
@@ -737,7 +694,6 @@ document.getElementById("settingsSave").onclick = async () => {
     failoverMs: g("setFailoverSec") * 1000,
     cacheTtlMs: g("setCacheMin") * 60000
   });
-  toast("Impostazioni salvate ✓");
   poll();
 };
 document.getElementById("tokenRegen").onclick = async () => {
@@ -876,7 +832,6 @@ document.getElementById("mfSave").onclick = async () => {
   };
   const r = await api("/hub/model-filter", "POST", body);
   document.getElementById("mfMsg").textContent = r.ok ? "salvato ✓" : ("errore: " + (r.error || ""));
-  if (r.ok) toast("Filtri modelli salvati ✓");
   poll();
 };
 document.getElementById("mfBlackAddBtn").onclick = async () => {

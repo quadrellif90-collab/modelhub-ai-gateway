@@ -161,9 +161,8 @@ function createWindow() {
     }
     return { action: "deny" };
   });
-  // Avvio ridotto: se startMinimized è true, parte solo in tray (non solo se launchedAtLogin)
-  if (prefs.features && prefs.features.startMinimized) win.hide();
-  else win.show();
+  if (!(prefs.features && prefs.features.startMinimized && launchedAtLogin)) win.show();
+  else win.hide();
   win.on("close", (e) => {
     if (isQuitting) return;
     e.preventDefault();
