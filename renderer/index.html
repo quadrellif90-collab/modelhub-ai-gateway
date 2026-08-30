@@ -92,9 +92,30 @@
 
             <section class="panel">
               <h2>Chiavi gateway</h2>
-              <p class="hint">Se definite, le API di inferenza richiedono <code>Authorization: Bearer <key></code> o <code>x-api-key</code>. Una per riga, vuoto = nessuna protezione.</p>
-              <textarea id="gwKeys" placeholder="mh-key-1&#10;mh-key-2"></textarea>
-              <button id="gwSave" class="btn primary">Salva chiavi</button>
+              <p class="hint">Le app collegate devono inviare <code>Authorization: Bearer &lt;key&gt;</code> (o <code>x-api-key</code>). Se vuoto = nessuna protezione. Le chiavi sono mostrate una sola volta al momento della creazione.</p>
+              <div class="row">
+                <input id="gwLabel" placeholder="etichetta (es. app-ios)" style="width:60%" />
+                <input id="gwRpm" type="number" min="0" placeholder="rpm (0=∞)" style="width:38%" />
+              </div>
+              <div class="row">
+                <button id="gwMint" class="btn primary">+ Genera nuova chiave</button>
+              </div>
+              <div id="gwNew" class="gwnew" style="display:none"></div>
+              <div id="gwList" class="gwlist"></div>
+            </section>
+
+            <section class="panel">
+              <h2>Cache semantica</h2>
+              <p class="hint">Layer opzionale sopra la cache esatta: embed del prompt → similarità coseno. Richiede un modello embedder nel registry. <b>Disattivata di default.</b></p>
+              <div class="row">
+                <label class="check"><input id="semOn" type="checkbox" /> abilita</label>
+                <select id="semEmbedder" title="Modello embedder" style="width:60%"></select>
+              </div>
+              <div class="row">
+                <label class="check">soglia similarità <input id="semThr" type="number" min="0.5" max="1" step="0.01" style="width:70px" value="0.95" /></label>
+                <button id="semClear" class="btn">Svuota</button>
+              </div>
+              <div id="semInfo" class="hint">–</div>
             </section>
 
       <section class="panel">

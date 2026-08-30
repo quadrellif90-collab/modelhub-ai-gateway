@@ -63,8 +63,11 @@ curl http://127.0.0.1:8787/v1/chat/completions \
 | `POST /hub/enhancer` | Configura il prompt enhancer (enabled/model/maxChars/timeoutMs) |
 | `POST /hub/features` | Toggle cache e probe automatico |
 | `POST /hub/key/reveal` | Rivela una API key salvata |
+| `POST /hub/gateway-keys` | Gestione chiavi gateway: `action: mint \| revoke \| limit` (mint ritorna il secret una sola volta; limit accetta `kid`, `tokens`, `spend`, `rpm`) |
+| `GET /hub/gateway-keys` | Elenco chiavi (kid, label, quota, uso) — mai il secret |
+| `POST /hub/semcache` | Cache semantica: `{enabled, embedder, threshold}` o `{action:"clear"}` |
 
-Variabili d'ambiente supportate: `MODELHUB_PORT`, `MODELHUB_DIR`, `MODELHUB_ENHANCE=0`, `MODELHUB_CACHE=0`, `MODELHUB_UPSTREAM_TIMEOUT`, `MODELHUB_UPSTREAM_TIMEOUT_NONSTREAM`, `AUTO_PROBE=0`, `CONTROL_TOKEN`.
+Variabili d'ambiente supportate: `MODELHUB_PORT`, `MODELHUB_DIR`, `MODELHUB_ENHANCE=0`, `MODELHUB_CACHE=0`, `MODELHUB_UPSTREAM_TIMEOUT`, `MODELHUB_UPSTREAM_TIMEOUT_NONSTREAM`, `AUTO_PROBE=0`, `CONTROL_TOKEN`, `MODELHUB_SEM_THRESHOLD` (soglia 0-100, default 95), `MODELHUB_SEM_MAX` (default 200), `MODELHUB_SEM_TTL` (ms, default 600000).
 
 ## Architettura
 
@@ -80,6 +83,7 @@ prefs.json         Preferenze runtime (profili, strategie, feature)
 ## Sicurezza
 
 - Le API key sono cifrate su disco (AES-256-GCM) e non lasciano mai la tua macchina: tutto il traffico passa dal processo locale verso i provider.
+- Le chiavi gateway sono identificate solo tramite hash pubblico (`kid`, SHA-256); il secret è mostrato una sola volta alla creazione e non viene mai persistito in chiaro su `gateway-keys.json` (che contiene solo `kid` + metadati).
 - Il server ascolta solo su `127.0.0.1`.
 - Dalla v0.5.0 le API di controllo `/hub/*` richiedono un token (`MODELHUB_TOKEN` env oppure `controlToken` in prefs) e le richieste chat richiedono una API key del gateway (configurabile nel pannello web). Il widget e il pannello web ricevono il token automaticamente.
 

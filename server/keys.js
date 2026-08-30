@@ -6,10 +6,18 @@ function genKey() {
   return "mh_" + crypto.randomBytes(20).toString("hex");
 }
 
+// Public, non-reversible id derived from the secret (shown in the UI instead of
+// the secret itself, which is only returned once at mint time).
+function kidOf(secret) {
+  return "mh-" + crypto.createHash("sha256").update(secret).digest("hex").slice(0, 16);
+}
+
 // Mint a new key with metadata. Returns the secret (shown once) + meta record.
 function mintKey(label) {
+  const key = genKey();
   return {
-    key: genKey(),
+    key,
+    kid: kidOf(key),
     meta: { label: typeof label === "string" ? label : "", createdAt: Date.now(), lastUsedAt: 0 }
   };
 }
@@ -23,4 +31,4 @@ function rateLimited(bucket, now, rpm) {
   return bucket.length >= rpm;
 }
 
-module.exports = { genKey, mintKey, rateLimited };
+module.exports = { genKey, mintKey, kidOf, rateLimited };

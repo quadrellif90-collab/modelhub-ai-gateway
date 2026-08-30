@@ -303,10 +303,50 @@ function renderPricing(s) {
 }
 
 function renderGatewayKeys(s) {
-  const ta = document.getElementById("gwKeys");
-  if (document.activeElement !== ta) {
-    ta.value = (s.gatewayKeys || []).join("\n");
+  const list = document.getElementById("gwList");
+  const keys = (s.gatewayKeys || []).map(k => ({
+    kid: k.kid, label: k.label || "", createdAt: k.createdAt || 0, lastUsedAt: k.lastUsedAt || 0,
+    rpm: k.rpm || 0, used: k.used || { tokens: 0, spent: 0 }
+  }));
+  if (!keys.length) {
+    list.innerHTML = `<div class="hint" style="padding:6px">nessuna chiave — genera la prima con il pulsante sopra.</div>`;
+    return;
   }
+  list.innerHTML = "";
+  for (const k of keys) {
+    const row = document.createElement("div");
+    row.className = "gwkey";
+    const used = (k.used && k.used.tokens) ? `${k.used.tokens} tok` : "–";
+    row.innerHTML = `
+      <div class="gwmeta">
+        <span class="gwkid">${esc(k.kid)}</span>
+        <span class="badge keyok">${esc(k.label || "senza nome")}</span>
+        ${k.rpm ? `<span class="badge">${k.rpm} rpm</span>` : ""}
+      </div>
+      <div class="gwsub">creata ${k.createdAt ? new Date(k.createdAt).toLocaleDateString() : "?"} · ultimo uso ${k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleString() : "mai"} · ${used}</div>
+      <div class="gwactions">
+        <button class="btn mini gw-limit" data-kid="${esc(k.kid)}" title="Imposta quota/rpm">quota</button>
+        <button class="btn mini danger gw-revoke" data-kid="${esc(k.kid)}" title="Revoca chiave">revoca</button>
+      </div>`;
+    list.appendChild(row);
+  }
+  list.querySelectorAll(".gw-revoke").forEach(b => {
+    b.onclick = async () => {
+      if (!confirm("Revocare la chiave " + b.dataset.kid + "? Le app che la usano smetteranno di funzionare.")) return;
+      await api("/hub/gateway-keys", "POST", { action: "revoke", kid: b.dataset.kid });
+      poll();
+    };
+  });
+  list.querySelectorAll(".gw-limit").forEach(b => {
+    b.onclick = async () => {
+      const t = prompt("Limite token/giorno (0 = illimitato):", "0");
+      if (t === null) return;
+      const r = prompt("Limite RPM (0 = illimitato):", "0");
+      if (r === null) return;
+      await api("/hub/gateway-keys", "POST", { action: "limit", kid: b.dataset.kid, tokens: Number(t) || 0, rpm: Number(r) || 0 });
+      poll();
+    };
+  });
 }
 
 function renderEnhancer(s) {
@@ -349,10 +389,23 @@ function renderSettings(s) {
   document.getElementById("plugCode").checked = plugs.includes("codepro");
   const f = s.features || {};
   document.getElementById("startMin").checked = !!(f.startMinimized);
+  // semantic cache panel
+  const sem = s.semCache || {};
+  document.getElementById("semOn").checked = !!sem.enabled;
+  const semSel = document.getElementById("semEmbedder");
+  if (document.activeElement !== semSel) {
+    semSel.innerHTML = `<option value="">— nessun embedder —</option>` +
+      (s.models || []).filter(m => m.enabled).map(m => `<option value="${esc(m.id)}">${esc(m.id)}</option>`).join("");
+    if (sem.embedder) semSel.value = sem.embedder;
+  }
+  document.getElementById("semThr").value = sem.threshold || 0.95;
+  document.getElementById("semInfo").textContent = sem.enabled
+    ? `stato: ${sem.enabled ? "ON" : "OFF"} · embedder: ${sem.embedder || "—"} · ${sem.size || 0} voci · soglia ${sem.threshold}`
+    : "cache semantica disattivata (off di default)";
   fetch(BASE + "/hub/keys", { headers: { "x-modelhub-token": TOKEN } }).then(r => r.ok ? r.json() : null).then(j => {
     if (!j) return;
     const sel = document.getElementById("klKey");
-    sel.innerHTML = (j.keys || []).map(k => `<option value="${esc(k.key)}">${esc(k.key)}${k.limit ? " (" + k.limit + " tok)" : ""}</option>`).join("") || `<option value="">nessuna chiave</option>`;
+    sel.innerHTML = (j.keys || []).map(k => `<option value="${esc(k.kid)}">${esc(k.kid)}${(k.limit && k.limit.tokens) ? " (" + k.limit.tokens + " tok)" : ""}</option>`).join("") || `<option value="">nessuna chiave</option>`;
   }).catch(() => {});
 }
 
@@ -518,9 +571,36 @@ document.getElementById("bulkImport").onclick = async () => {
     poll();
   } catch (e) { msg.textContent = "Errore: " + e.message; msg.className = "msg err"; }
 };
-document.getElementById("gwSave").onclick = async () => {
-  const keys = document.getElementById("gwKeys").value.split("\n").map(k => k.trim()).filter(Boolean);
-  await api("/hub/gateway-keys", "POST", { keys });
+document.getElementById("gwMint").onclick = async () => {
+  const label = document.getElementById("gwLabel").value.trim();
+  const rpm = Number(document.getElementById("gwRpm").value) || 0;
+  const r = await api("/hub/gateway-keys", "POST", { action: "mint", label, rpm });
+  if (r && r.secret) {
+    const box = document.getElementById("gwNew");
+    box.style.display = "block";
+    box.innerHTML = `<div class="hint">Chiave generata (salvala ora, non verrà più mostrata):</div>
+      <div class="gwsecret" id="gwSecret">${esc(r.secret)}</div>
+      <button class="btn mini" id="gwCopy">📋 copia</button>`;
+    document.getElementById("gwCopy").onclick = async () => {
+      try { await navigator.clipboard.writeText(r.secret); flash("Chiave copiata"); } catch {}
+    };
+  }
+  poll();
+};
+document.getElementById("semOn").onchange = async (e) => {
+  await api("/hub/semcache", "POST", { enabled: e.target.checked });
+  poll();
+};
+document.getElementById("semEmbedder").onchange = async (e) => {
+  await api("/hub/semcache", "POST", { embedder: e.target.value });
+  poll();
+};
+document.getElementById("semThr").onchange = async (e) => {
+  const v = Number(e.target.value);
+  if (Number.isFinite(v) && v >= 0.5 && v <= 1) { await api("/hub/semcache", "POST", { threshold: v }); poll(); }
+};
+document.getElementById("semClear").onclick = async () => {
+  await api("/hub/semcache", "POST", { action: "clear" });
   poll();
 };
 document.getElementById("cacheClear").onclick = async () => {
@@ -586,10 +666,11 @@ document.getElementById("tokenRegen").onclick = async () => {
   poll();
 };
 document.getElementById("klSave").onclick = async () => {
-  const key = document.getElementById("klKey").value;
+  const kid = document.getElementById("klKey").value;
+  if (!kid) { document.getElementById("klInfo").textContent = "nessuna chiave selezionata"; return; }
   const tokens = Number(document.getElementById("klTokens").value) || 0;
   const spend = Number(document.getElementById("klSpend").value) || 0;
-  const r = await api("/hub/keys", "POST", { key, tokens, spend });
+  const r = await api("/hub/gateway-keys", "POST", { action: "limit", kid, tokens, spend });
   document.getElementById("klInfo").textContent = r && r.ok ? "quota salvata" : "errore";
   poll();
 };

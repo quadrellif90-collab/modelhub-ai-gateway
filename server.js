@@ -151,24 +151,42 @@ if (!prefs.strategy || typeof prefs.strategy !== "object") prefs.strategy = {};
 if (!Array.isArray(prefs.gatewayKeys)) prefs.gatewayKeys = [];
 
 // ---------------------------------------------------------------------------
-// gateway keys: full state (key -> meta), per-key rpm buckets, semantic cache
+// gateway keys: secrets live ONLY in prefs.gatewayKeys (memory + prefs.json),
+// never persisted in plaintext. gateway-keys.json stores kid (sha256) + meta.
 // ---------------------------------------------------------------------------
-const { genKey, mintKey, rateLimited } = keysLib;
-let gatewayKeysMeta = {};                 // key -> { label, createdAt, lastUsedAt }
+const { genKey, mintKey, kidOf, rateLimited } = keysLib;
+let gatewayKeysMeta = {};                 // kid -> { label, createdAt, lastUsedAt }
+let gatewayKids = new Map();              // kid -> secret (mirror of prefs.gatewayKeys)
 try {
   const raw = readJSON(path.join(DIR, "gateway-keys.json"), null);
   if (raw && typeof raw === "object") {
     gatewayKeysMeta = raw.meta || {};
-    if (Array.isArray(raw.keys)) {
-      for (const k of raw.keys) if (!prefs.gatewayKeys.includes(k)) prefs.gatewayKeys.push(k);
+    // Support both new format (kids = hashes, secret NOT persisted) and legacy
+    // format (keys = plaintext secrets). Legacy secrets are migrated to kids.
+    const legacy = Array.isArray(raw.keys) ? raw.keys.filter(k => typeof k === "string") : [];
+    const kids = Array.isArray(raw.kids) ? raw.kids.filter(k => typeof k === "string") : [];
+    for (const sec of legacy) {
+      const k = kidOf(sec);
+      gatewayKids.set(k, sec); // legacy: we still have the secret, keep it working
+    }
+    for (const k of kids) {
+      if (!gatewayKids.has(k)) gatewayKids.set(k, null); // secret not persisted, only kid+meta
     }
   }
 } catch { /* no prior keys file */ }
-const keyRpm = new Map();                 // key -> number[] (60s sliding timestamps)
+// rebuild kid map from in-memory secrets (prefs.gatewayKeys)
+for (const secret of (prefs.gatewayKeys || [])) gatewayKids.set(kidOf(secret), secret);
 function writeGatewayKeys() {
   try {
-    writeJSON(path.join(DIR, "gateway-keys.json"), { keys: prefs.gatewayKeys, meta: gatewayKeysMeta }, log);
+    writeJSON(path.join(DIR, "gateway-keys.json"), { kids: [...gatewayKids.keys()], meta: gatewayKeysMeta }, log);
   } catch { /* best effort */ }
+}
+const keyRpm = new Map();                 // kid -> number[] (60s sliding timestamps)
+// resolve a raw bearer to its kid if it is a known gateway key
+function resolveGatewayKid(secret) {
+  if (!secret) return null;
+  const kid = kidOf(secret);
+  return gatewayKids.has(kid) ? kid : null;
 }
 
 // Semantic cache (optional layer above exact-match). Enabled via prefs.features.semCache
@@ -1049,23 +1067,25 @@ function gatewayAuthorized(req) {
     ? req.headers["authorization"].replace(/^Bearer\s+/i, "")
     : "";
   const alt = req.headers["x-api-key"] || "";
-  const key = auth || alt || null;
-  if (!prefs.gatewayKeys || !prefs.gatewayKeys.length) return { ok: true, key: null };
-  if (!key || !prefs.gatewayKeys.includes(key)) return { ok: false, code: 401, error: "invalid or missing API key", key: null };
-  if (keyOverLimit(key)) return { ok: false, code: 429, error: "key quota reached", key };
+  const secret = auth || alt || null;
+  if (!gatewayKids.size) return { ok: true, key: null };
+  const kid = resolveGatewayKid(secret);
+  if (!kid) return { ok: false, code: 401, error: "invalid or missing API key", key: null };
+  const limitKey = secret; // keyLimit reads prefs.keylimits keyed by secret
+  if (keyOverLimit(limitKey)) return { ok: false, code: 429, error: "key quota reached", key: kid };
   // per-key requests-per-minute (sliding 60s window)
-  const lim = keyLimit(key);
+  const lim = keyLimit(limitKey);
   if (lim && lim.rpm) {
     const now = Date.now();
-    const bucket = keyRpm.get(key) || [];
-    if (rateLimited(bucket, now, lim.rpm)) return { ok: false, code: 429, error: "rate limit exceeded (rpm)", key };
+    const bucket = keyRpm.get(kid) || [];
+    if (rateLimited(bucket, now, lim.rpm)) return { ok: false, code: 429, error: "rate limit exceeded (rpm)", key: kid };
     bucket.push(now);
-    keyRpm.set(key, bucket);
+    keyRpm.set(kid, bucket);
   }
   // record usage timestamp
-  const meta = gatewayKeysMeta[key];
+  const meta = gatewayKeysMeta[kid];
   if (meta) meta.lastUsedAt = Date.now();
-  return { ok: true, key };
+  return { ok: true, key: kid };
 }
 
 // ---------------------------------------------------------------------------
@@ -1182,14 +1202,15 @@ function controlState() {
       score: Math.round(autorouteScore(m.id))
     })).sort((a, b) => b.score - a.score).slice(0, 30),
     pricing: { currency: pricing.currency || "USD", providers: pricing.providers },
-    gatewayKeys: (prefs.gatewayKeys || []).map(k => ({
-      key: k.slice(0, 7) + "…" + k.slice(-4),
-      label: (gatewayKeysMeta[k] && gatewayKeysMeta[k].label) || "",
-      createdAt: (gatewayKeysMeta[k] && gatewayKeysMeta[k].createdAt) || 0,
-      lastUsedAt: (gatewayKeysMeta[k] && gatewayKeysMeta[k].lastUsedAt) || 0,
-      limit: keyLimit(k),
-      used: keyUsed(k),
-      rpm: (keyLimit(k) && keyLimit(k).rpm) || 0
+    gatewayKeys: [...gatewayKids.keys()].map(kid => ({
+      kid,
+      label: (gatewayKeysMeta[kid] && gatewayKeysMeta[kid].label) || "",
+      createdAt: (gatewayKeysMeta[kid] && gatewayKeysMeta[kid].createdAt) || 0,
+      lastUsedAt: (gatewayKeysMeta[kid] && gatewayKeysMeta[kid].lastUsedAt) || 0,
+      // prefs.keylimits is keyed by secret; look up via the in-memory secret
+      limit: keyLimit(gatewayKids.get(kid) || kid),
+      used: keyUsed(gatewayKids.get(kid) || kid),
+      rpm: (keyLimit(gatewayKids.get(kid) || kid) && keyLimit(gatewayKids.get(kid) || kid).rpm) || 0
     })),
     semCache: { enabled: semOn, size: semCache.size(), threshold: semCfg().threshold, embedder: semCfg().embedder },
     cache: { enabled: cacheOn, size: responseCache.size, hits: cacheHits, ttlMs: CACHE_TTL_MS },
@@ -1418,29 +1439,38 @@ async function handleControl(req, res, url) {
   // --- Gateway key management (POST): mint | revoke | limit -----------------
   if (url === "/hub/gateway-keys" && req.method === "POST") {
     prefs.keylimits = prefs.keylimits || {};
-    // Revoke a key
-    if (body.action === "revoke" && body.key) {
-      prefs.gatewayKeys = (prefs.gatewayKeys || []).filter(k => k !== body.key);
-      delete gatewayKeysMeta[body.key];
-      delete prefs.keylimits[body.key];
+    // helper: resolve a kid (from UI) to the in-memory secret
+    const secretFor = (kid) => (kid && gatewayKids.has(kid)) ? gatewayKids.get(kid) : null;
+    // Revoke a key (by kid)
+    if (body.action === "revoke" && body.kid) {
+      const sec = secretFor(body.kid);
+      if (sec) {
+        gatewayKids.delete(body.kid);
+        prefs.gatewayKeys = prefs.gatewayKeys.filter(k => k !== sec);
+        delete gatewayKeysMeta[body.kid];
+        delete prefs.keylimits[sec];
+      }
       writeGatewayKeys();
       writeJSON(PREFS_FILE, prefs, log);
-      return sendJSON(res, 200, { ok: true, count: prefs.gatewayKeys.length });
+      return sendJSON(res, 200, { ok: true, count: gatewayKids.size });
     }
-    // Set per-key limits (tokens / spend / rpm)
-    if (body.action === "limit" && body.key) {
-      const lim = prefs.keylimits[body.key] || (prefs.keylimits[body.key] = {});
+    // Set per-key limits (tokens / spend / rpm) — keyed by kid
+    if (body.action === "limit" && body.kid) {
+      const sec = secretFor(body.kid);
+      if (!sec) return sendJSON(res, 404, { error: "unknown key id" });
+      const lim = prefs.keylimits[sec] || (prefs.keylimits[sec] = {});
       if (Number.isFinite(body.tokens)) lim.tokens = body.tokens;
       if (Number.isFinite(body.spend)) lim.spend = body.spend;
       if (Number.isFinite(body.rpm)) lim.rpm = Math.max(0, Math.floor(body.rpm));
       writeJSON(PREFS_FILE, prefs, log);
-      return sendJSON(res, 200, { ok: true, key: body.key, limit: keyLimit(body.key) });
+      return sendJSON(res, 200, { ok: true, kid: body.kid, limit: keyLimit(sec) });
     }
-    // Mint a new key (optionally labelled)
+    // Mint a new key (optionally labelled + initial limits)
     if (body.action === "mint" || body.mint || !body.action) {
-      const { key, meta } = mintKey(body.label);
+      const { key, kid, meta } = mintKey(body.label);
       prefs.gatewayKeys.push(key);
-      gatewayKeysMeta[key] = meta;
+      gatewayKids.set(kid, key);
+      gatewayKeysMeta[kid] = meta;
       if (Number.isFinite(body.rpm) || Number.isFinite(body.tokens) || Number.isFinite(body.spend)) {
         const lim = prefs.keylimits[key] || (prefs.keylimits[key] = {});
         if (Number.isFinite(body.tokens)) lim.tokens = body.tokens;
@@ -1449,21 +1479,22 @@ async function handleControl(req, res, url) {
       }
       writeGatewayKeys();
       writeJSON(PREFS_FILE, prefs, log);
-      // NOTE: the secret is returned only on mint. Persisted only as meta (no secret at rest in prefs).
+      // NOTE: the secret is returned ONLY here, once. gateway-keys.json stores kid+meta only.
       return sendJSON(res, 200, {
-        ok: true, secret: key, label: body.label || "",
-        count: prefs.gatewayKeys.length, limit: keyLimit(key)
+        ok: true, secret: key, kid, label: body.label || "",
+        count: gatewayKids.size, limit: keyLimit(key)
       });
     }
     return sendJSON(res, 400, { error: "unknown gateway-keys action" });
   }
   if (req.method === "GET" && url === "/hub/gateway-keys") {
     return sendJSON(res, 200, {
-      keys: (prefs.gatewayKeys || []).map(k => ({
-        key: k.slice(0, 7) + "…" + k.slice(-4), label: (gatewayKeysMeta[k] && gatewayKeysMeta[k].label) || "",
-        createdAt: (gatewayKeysMeta[k] && gatewayKeysMeta[k].createdAt) || 0,
-        lastUsedAt: (gatewayKeysMeta[k] && gatewayKeysMeta[k].lastUsedAt) || 0,
-        rpm: (keyLimit(k) && keyLimit(k).rpm) || 0, limit: keyLimit(k), used: keyUsed(k)
+      keys: [...gatewayKids.keys()].map(kid => ({
+        kid, label: (gatewayKeysMeta[kid] && gatewayKeysMeta[kid].label) || "",
+        createdAt: (gatewayKeysMeta[kid] && gatewayKeysMeta[kid].createdAt) || 0,
+        lastUsedAt: (gatewayKeysMeta[kid] && gatewayKeysMeta[kid].lastUsedAt) || 0,
+        rpm: (keyLimit(gatewayKids.get(kid) || kid) && keyLimit(gatewayKids.get(kid) || kid).rpm) || 0,
+        limit: keyLimit(gatewayKids.get(kid) || kid), used: keyUsed(gatewayKids.get(kid) || kid)
       }))
     });
   }
@@ -1496,7 +1527,10 @@ async function handleControl(req, res, url) {
   }
   if (url === "/hub/keys") {
     if (req.method === "GET") {
-      const keys = (prefs.gatewayKeys || []).map(k => ({ key: k, limit: keyLimit(k), used: keyUsed(k), rpm: (keyLimit(k) && keyLimit(k).rpm) || 0 }));
+      const keys = [...gatewayKids.keys()].map(kid => {
+        const sec = gatewayKids.get(kid);
+        return { kid, key: sec, limit: keyLimit(sec), used: keyUsed(sec), rpm: (keyLimit(sec) && keyLimit(sec).rpm) || 0 };
+      });
       return sendJSON(res, 200, { keys });
     }
     // Bulk import provider keys: { "openai": "sk-...", "anthropic": "sk-...", ... }

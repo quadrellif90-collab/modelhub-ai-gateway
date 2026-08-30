@@ -161,3 +161,13 @@ body.light .model .minfo, body.light .mstat { color: #8a93a0; }
   .topbar .actions { flex-wrap: wrap; }
   section.panel { margin-bottom: 12px; }
 }
+
+/* Gateway key manager (v0.7.4) */
+.gwnew { background: var(--panel2); border: 1px solid var(--accent); border-radius: 8px; padding: 10px; margin: 8px 0; }
+.gwsecret { font-family: ui-monospace, Consolas, monospace; font-size: 12px; word-break: break-all; background: var(--bg); padding: 8px; border-radius: 6px; margin: 6px 0; color: var(--green); }
+.gwlist { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.gwkey { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.gwmeta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.gwkid { font-family: ui-monospace, Consolas, monospace; font-size: 11px; color: var(--accent); }
+.gwsub { color: var(--muted); font-size: 10px; margin: 3px 0 6px; }
+.gwactions { display: flex; gap: 6px; }
