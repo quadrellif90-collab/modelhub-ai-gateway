@@ -57,11 +57,16 @@ function req(method, urlPath, body) {
   const auto = st.profileOrder["auto"] || [];
   const freepool = st.profileOrder["free-pool"] || [];
   const acode = st.profileOrder["auto-code"] || [];
+  const areason = st.profileOrder["auto-reasoning"] || [];
   ok("auto ha modelli", auto.length > 0);
   ok("free-pool ha modelli", freepool.length > 0);
   ok("auto-code ha modelli", acode.length > 0);
-  ok("auto-code != auto (sottoinsieme diverso)", JSON.stringify(auto) !== JSON.stringify(acode));
+  ok("auto-reasoning ha modelli", areason.length > 0);
+  ok("auto-code e' sottoinsieme di auto (NON tutti uguali)", acode.length < auto.length && JSON.stringify(auto) !== JSON.stringify(acode));
+  ok("auto-reasoning e' sottoinsieme di auto", areason.length < auto.length);
+  ok("auto-code != auto (ordinamenti diversi)", JSON.stringify(auto) !== JSON.stringify(acode));
   ok("free-pool sono tutti free", freepool.every(id => { const mm = st.models.find(x => x.id === id); return mm && mm.isFree; }));
+  ok("auto-code sono tutti code", acode.every(id => /cod(e|ing|er)|devstral|starcoder|deepseek-v3|glm-4-5|kimi-k2|minimax-m2|qwen.*coder/i.test(id)));
 
   console.log("\n[3] Cambio profilo via API (reorder) persistito");
   const before = (await req("GET", "/hub/state")).body.profileOrder["auto"];

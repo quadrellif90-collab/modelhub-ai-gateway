@@ -401,15 +401,19 @@ function rebuildProfiles() {
   const enabledIds = models.filter(m => m.enabled && isChatModel(m.id)).map(m => m.id);
   const enabledSet = new Set(enabledIds);
   const scored = enabledIds.slice().sort((a, b) => autorouteScore(b) - autorouteScore(a));
+  // Profili specializzati: contengono SOLO i modelli della categoria (strict).
+  const codeIds = scored.filter(id => classify(id).code);
+  const reasoningIds = scored.filter(id => classify(id).reasoning);
+  const fastIds = scored.filter(id => classify(id).fast);
   const defaultMerge = (prof, generated, strict) => {
     const arr = prefs.profiles[prof];
     const base = (Array.isArray(arr) && arr.length) ? arr : generated;
     prefs.profiles[prof] = mergedOrder(base, generated, enabledSet, strict);
   };
   defaultMerge("auto", scored, false);
-  defaultMerge("auto-code", catFirst(scored, c => c.code), true);
-  defaultMerge("auto-reasoning", catFirst(scored, c => c.reasoning), true);
-  defaultMerge("auto-fast", catFirst(scored, c => c.fast), true);
+  defaultMerge("auto-code", codeIds, true);
+  defaultMerge("auto-reasoning", reasoningIds, true);
+  defaultMerge("auto-fast", fastIds, true);
   defaultMerge("free-pool", buildFreePool(), true);
   for (const prof of Object.keys(prefs.profiles)) {
     if (["auto", "auto-code", "auto-reasoning", "auto-fast", "free-pool"].includes(prof)) continue;
