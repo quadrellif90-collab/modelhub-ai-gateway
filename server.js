@@ -67,7 +67,7 @@ const SIGNUP_URLS = {
   xai: "https://console.x.ai",
   zai: "https://z.ai/manage-apikey/apikey-list"
 };
-const VERSION = "0.7.5";
+const VERSION = "0.7.6";
 let cacheOn = process.env.MODELHUB_CACHE !== "0";
 let autoProbeOn = AUTO_PROBE;
 const UA_HTTP = new http.Agent({ keepAlive: true, maxSockets: 64 });
@@ -2253,25 +2253,22 @@ function startHub() {
   // enable semantic cache only when explicitly configured (default off)
   semOn = !!(semCfg().enabled && semCfg().embedder);
   log(`semantic cache ${semOn ? "enabled" : "disabled"} (embedder: ${semCfg().embedder || "none"})`);
-  const listen = () => {
-    server.listen(PORT, "127.0.0.1", () => log(`ModelHub listening on ${PORT}`));
-    startBackgroundProber();
-    startProfileRefresher();
-  };
+  // Bind the port IMMEDIATELY so the panel + API respond even while the
+  // (potentially slow) startup model verify is still running in the background.
+  server.listen(PORT, "127.0.0.1", () => log(`ModelHub listening on ${PORT}`));
+  startBackgroundProber();
+  startProfileRefresher();
   if (featuresCfg().autoProbe) {
     log("startup verify: testing profile heads...");
     verifyHeads().then(() => {
       log("startup verify done");
       prunePaidModels();
-      listen();
     }).catch(err => {
       log("startup verify error: " + err.message);
       prunePaidModels();
-      listen();
     });
   } else {
     prunePaidModels();
-    listen();
   }
 }
 
