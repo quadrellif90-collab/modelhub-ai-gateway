@@ -299,3 +299,44 @@ describe("openai streaming e2e", () => {
     });
   });
 });
+
+describe("gateway keys", () => {
+  test("mintKey produces a prefixed secret + meta", () => {
+    const { key, meta } = mh.mintKey("test");
+    assert.match(key, /^mh_/);
+    assert.strictEqual(meta.label, "test");
+    assert.ok(meta.createdAt > 0);
+  });
+  test("rateLimited sliding 60s window", () => {
+    const now = Date.now();
+    const bucket = [now - 70000, now - 5000, now - 1000]; // one stale + 2 fresh
+    assert.strictEqual(mh.rateLimited(bucket, now, 2), true);
+    const bucket2 = [now - 70000]; // stale only
+    assert.strictEqual(mh.rateLimited(bucket2, now, 2), false);
+    assert.strictEqual(mh.rateLimited([], now, 0), false); // rpm 0 = unlimited
+  });
+});
+
+describe("semantic cache", () => {
+  const sem = require("../server/semcache.js");
+  test("matches near-identical embeddings above threshold", () => {
+    const c = sem.createSemCache({ threshold: undefined });
+    const v = [1, 0, 0, 0];
+    c.add(v, { text: "hello" });
+    // identical vector -> sim 1.0
+    assert.deepStrictEqual(c.match([1, 0, 0, 0], 0.95), { text: "hello" });
+    // orthogonal vector -> sim 0, below threshold
+    assert.strictEqual(c.match([0, 1, 0, 0], 0.95), null);
+  });
+  test("respects TTL", () => {
+    const c = sem.createSemCache({ ttlMs: 1 });
+    c.add([1, 0], { x: 1 });
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        assert.strictEqual(c.match([1, 0], 0.95), null);
+        resolve();
+      }, 5);
+    });
+  });
+});
+

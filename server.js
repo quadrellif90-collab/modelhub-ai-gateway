@@ -15,6 +15,8 @@ const storageLib = require("./server/storage.js");
 const routingLib = require("./server/routing.js");
 const cacheLib = require("./server/cache.js");
 const metricsLib = require("./server/metrics.js");
+const keysLib = require("./server/keys.js");
+const semCacheLib = require("./server/semcache.js");
 
 const PORT = parseInt(process.env.MODELHUB_PORT || "8787", 10);
 const DIR = process.env.MODELHUB_DIR || __dirname;
@@ -65,7 +67,7 @@ const SIGNUP_URLS = {
   xai: "https://console.x.ai",
   zai: "https://z.ai/manage-apikey/apikey-list"
 };
-const VERSION = "0.7.0";
+const VERSION = "0.7.4";
 let cacheOn = process.env.MODELHUB_CACHE !== "0";
 let autoProbeOn = AUTO_PROBE;
 const UA_HTTP = new http.Agent({ keepAlive: true, maxSockets: 64 });
@@ -147,6 +149,48 @@ if (!prefs.enabled) prefs.enabled = {};
 if (!prefs.profiles) prefs.profiles = {};
 if (!prefs.strategy || typeof prefs.strategy !== "object") prefs.strategy = {};
 if (!Array.isArray(prefs.gatewayKeys)) prefs.gatewayKeys = [];
+
+// ---------------------------------------------------------------------------
+// gateway keys: full state (key -> meta), per-key rpm buckets, semantic cache
+// ---------------------------------------------------------------------------
+const { genKey, mintKey, rateLimited } = keysLib;
+let gatewayKeysMeta = {};                 // key -> { label, createdAt, lastUsedAt }
+try {
+  const raw = readJSON(path.join(DIR, "gateway-keys.json"), null);
+  if (raw && typeof raw === "object") {
+    gatewayKeysMeta = raw.meta || {};
+    if (Array.isArray(raw.keys)) {
+      for (const k of raw.keys) if (!prefs.gatewayKeys.includes(k)) prefs.gatewayKeys.push(k);
+    }
+  }
+} catch { /* no prior keys file */ }
+const keyRpm = new Map();                 // key -> number[] (60s sliding timestamps)
+function writeGatewayKeys() {
+  try {
+    writeJSON(path.join(DIR, "gateway-keys.json"), { keys: prefs.gatewayKeys, meta: gatewayKeysMeta }, log);
+  } catch { /* best effort */ }
+}
+
+// Semantic cache (optional layer above exact-match). Enabled via prefs.features.semCache
+// and prefs.semCache.embedder (a model id from the registry). When no embedder is set
+// it stays a no-op so behavior is identical to before.
+const SEM_THRESHOLD = Number.isFinite(parseInt(process.env.MODELHUB_SEM_THRESHOLD, 10))
+  ? Math.min(1, Math.max(0, parseInt(process.env.MODELHUB_SEM_THRESHOLD, 10) / 100))
+  : 0.95;
+let semCache = semCacheLib.createSemCache({
+  max: parseInt(process.env.MODELHUB_SEM_MAX || "200", 10),
+  ttlMs: parseInt(process.env.MODELHUB_SEM_TTL || "600000", 10)
+});
+let semOn = false;
+function semCfg() {
+  const f = prefs.features || {};
+  const sc = prefs.semCache || {};
+  return {
+    enabled: typeof f.semCache === "boolean" ? f.semCache : false,
+    embedder: typeof sc.embedder === "string" && sc.embedder ? sc.embedder : null,
+    threshold: Number.isFinite(sc.threshold) ? sc.threshold : SEM_THRESHOLD
+  };
+}
 
 // ---------------------------------------------------------------------------
 // pricing (USD per milione di token)
@@ -270,6 +314,18 @@ function rebuildModels() {
   log(`rebuilt: ${models.length} models across ${config.providers.length} providers`);
 }
 
+// Rimuove i modelli a pagamento lasciando solo i free.
+// Deve essere chiamata DOPO i test di verifica (verifyHeads) così i modelli
+// paid vengono comunque probe-ati (per scoprire nuovi free tra gli aggiornamenti)
+// e poi scartati, in modo che il routing usi solo modelli free.
+function prunePaidModels() {
+  const before = models.length;
+  models = models.filter(m => m.free);
+  modelMap = new Map(models.map(m => [m.id, m]));
+  rebuildProfiles();
+  if (before !== models.length) log(`pruned ${before - models.length} paid models, ${models.length} free remaining`);
+}
+
 const { classify, classifyPrompt, catFirst, CHAT_BLOCK } = modelsLib;
 
 function isChatModel(id) {
@@ -325,7 +381,7 @@ function keyIdFor(req) {
 function keyLimit(key) {
   if (!key) return null;
   const lim = (prefs.keylimits && prefs.keylimits[key]) || {};
-  return { tokens: lim.tokens || 0, spend: lim.spend || 0 };
+  return { tokens: lim.tokens || 0, spend: lim.spend || 0, rpm: lim.rpm || 0 };
 }
 function keyUsed(key) { return keyUsage.get(key) || { tokens: 0, spent: 0 }; }
 function recordKeyUsage(key, tokens, cost) {
@@ -690,17 +746,53 @@ async function postNonStreaming(m, openaiBody, key) {
 // ---------------------------------------------------------------------------
 // non-streaming con failover sui candidati del profilo
 // ---------------------------------------------------------------------------
+// semantic cache embedder helper (no-op until an embedder model is configured)
+// ---------------------------------------------------------------------------
+async function semEmbed(text) {
+  const cfg = semCfg();
+  if (!semOn || !cfg.enabled || !cfg.embedder) return null;
+  const m = modelMap.get(cfg.embedder);
+  if (!m || !m.enabled) return null;
+  try {
+    const out = await embeddingsForward(m, { input: [text], encoding_format: "float" });
+    if (!out.ok || !out.data || !Array.isArray(out.data.data) || !out.data.data[0]) return null;
+    const e = out.data.data[0].embedding;
+    return Array.isArray(e) ? e : null;
+  } catch { return null; }
+}
+
+// ---------------------------------------------------------------------------
 async function postWithFailover(openaiBody, key) {
   const profile = resolveProfile(openaiBody.model, openaiBody.messages);
   const strategy = strategyFor(profile);
   const tried = [];
   const ck = cacheKey(openaiBody);
+
+  // 1) exact-match cache (existing behaviour)
   const cached = cacheGet(ck);
   if (cached) {
     cacheHits++;
     recordRequest({ proto: "cache", reqModel: openaiBody.model, model: null, ok: true, error: "", latencyMs: 0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: true });
     return { ok: true, data: { ...cached, modelhub_cached: true }, modelId: null, cached: true };
   }
+
+  // 2) semantic cache (optional): embed the latest user prompt and look up similar
+  let semPrompt = null;
+  if (semOn && semCfg().enabled && semCfg().embedder) {
+    const lastUser = (openaiBody.messages || []).filter(m => m.role === "user").pop();
+    semPrompt = typeof lastUser?.content === "string" ? lastUser.content : null;
+    if (semPrompt) {
+      const vec = await semEmbed(semPrompt);
+      if (vec) {
+        const hit = semCache.match(vec, semCfg().threshold);
+        if (hit) {
+          recordRequest({ proto: "cache-sem", reqModel: openaiBody.model, model: null, ok: true, error: "", latencyMs: 0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: true });
+          return { ok: true, data: { ...hit, modelhub_sem_cached: true }, modelId: null, cached: true, semantic: true };
+        }
+      }
+    }
+  }
+
   const candidates = selectCandidates(openaiBody.model, profile);
   const chainStart = Date.now();
   const CHAIN_BUDGET = settingsCfg().failoverMs;
@@ -718,6 +810,11 @@ async function postWithFailover(openaiBody, key) {
       continue;
     }
     cachePut(ck, r.data);
+    // store in semantic cache if we have a prompt vector
+    if (semPrompt) {
+      const vec = await semEmbed(semPrompt);
+      if (vec) semCache.add(vec, r.data);
+    }
     recordRequest({
       proto: "chat", reqModel: openaiBody.model, model: id, ok: true, error: "",
       latencyMs: r.latencyMs || 0, ttftMs: null,
@@ -953,11 +1050,22 @@ function gatewayAuthorized(req) {
     : "";
   const alt = req.headers["x-api-key"] || "";
   const key = auth || alt || null;
-  if (!prefs.gatewayKeys || !prefs.gatewayKeys.length) return true;
-  const ok = prefs.gatewayKeys.includes(auth) || prefs.gatewayKeys.includes(alt);
-  if (!ok) return false;
-  if (key && keyOverLimit(key)) return false;
-  return true;
+  if (!prefs.gatewayKeys || !prefs.gatewayKeys.length) return { ok: true, key: null };
+  if (!key || !prefs.gatewayKeys.includes(key)) return { ok: false, code: 401, error: "invalid or missing API key", key: null };
+  if (keyOverLimit(key)) return { ok: false, code: 429, error: "key quota reached", key };
+  // per-key requests-per-minute (sliding 60s window)
+  const lim = keyLimit(key);
+  if (lim && lim.rpm) {
+    const now = Date.now();
+    const bucket = keyRpm.get(key) || [];
+    if (rateLimited(bucket, now, lim.rpm)) return { ok: false, code: 429, error: "rate limit exceeded (rpm)", key };
+    bucket.push(now);
+    keyRpm.set(key, bucket);
+  }
+  // record usage timestamp
+  const meta = gatewayKeysMeta[key];
+  if (meta) meta.lastUsedAt = Date.now();
+  return { ok: true, key };
 }
 
 // ---------------------------------------------------------------------------
@@ -1074,7 +1182,16 @@ function controlState() {
       score: Math.round(autorouteScore(m.id))
     })).sort((a, b) => b.score - a.score).slice(0, 30),
     pricing: { currency: pricing.currency || "USD", providers: pricing.providers },
-    gatewayKeys: prefs.gatewayKeys,
+    gatewayKeys: (prefs.gatewayKeys || []).map(k => ({
+      key: k.slice(0, 7) + "…" + k.slice(-4),
+      label: (gatewayKeysMeta[k] && gatewayKeysMeta[k].label) || "",
+      createdAt: (gatewayKeysMeta[k] && gatewayKeysMeta[k].createdAt) || 0,
+      lastUsedAt: (gatewayKeysMeta[k] && gatewayKeysMeta[k].lastUsedAt) || 0,
+      limit: keyLimit(k),
+      used: keyUsed(k),
+      rpm: (keyLimit(k) && keyLimit(k).rpm) || 0
+    })),
+    semCache: { enabled: semOn, size: semCache.size(), threshold: semCfg().threshold, embedder: semCfg().embedder },
     cache: { enabled: cacheOn, size: responseCache.size, hits: cacheHits, ttlMs: CACHE_TTL_MS },
     features: featuresCfg(),
     settings: settingsCfg(),
@@ -1298,19 +1415,88 @@ async function handleControl(req, res, url) {
     writeJSON(PRICING_FILE, pricing);
     return sendJSON(res, 200, { ok: true });
   }
-  if (url === "/hub/gateway-keys" && Array.isArray(body.keys)) {
-    prefs.gatewayKeys = body.keys.map(k => String(k).trim()).filter(Boolean);
-    writeJSON(PREFS_FILE, prefs, log);
-    return sendJSON(res, 200, { ok: true, count: prefs.gatewayKeys.length });
+  // --- Gateway key management (POST): mint | revoke | limit -----------------
+  if (url === "/hub/gateway-keys" && req.method === "POST") {
+    prefs.keylimits = prefs.keylimits || {};
+    // Revoke a key
+    if (body.action === "revoke" && body.key) {
+      prefs.gatewayKeys = (prefs.gatewayKeys || []).filter(k => k !== body.key);
+      delete gatewayKeysMeta[body.key];
+      delete prefs.keylimits[body.key];
+      writeGatewayKeys();
+      writeJSON(PREFS_FILE, prefs, log);
+      return sendJSON(res, 200, { ok: true, count: prefs.gatewayKeys.length });
+    }
+    // Set per-key limits (tokens / spend / rpm)
+    if (body.action === "limit" && body.key) {
+      const lim = prefs.keylimits[body.key] || (prefs.keylimits[body.key] = {});
+      if (Number.isFinite(body.tokens)) lim.tokens = body.tokens;
+      if (Number.isFinite(body.spend)) lim.spend = body.spend;
+      if (Number.isFinite(body.rpm)) lim.rpm = Math.max(0, Math.floor(body.rpm));
+      writeJSON(PREFS_FILE, prefs, log);
+      return sendJSON(res, 200, { ok: true, key: body.key, limit: keyLimit(body.key) });
+    }
+    // Mint a new key (optionally labelled)
+    if (body.action === "mint" || body.mint || !body.action) {
+      const { key, meta } = mintKey(body.label);
+      prefs.gatewayKeys.push(key);
+      gatewayKeysMeta[key] = meta;
+      if (Number.isFinite(body.rpm) || Number.isFinite(body.tokens) || Number.isFinite(body.spend)) {
+        const lim = prefs.keylimits[key] || (prefs.keylimits[key] = {});
+        if (Number.isFinite(body.tokens)) lim.tokens = body.tokens;
+        if (Number.isFinite(body.spend)) lim.spend = body.spend;
+        if (Number.isFinite(body.rpm)) lim.rpm = Math.max(0, Math.floor(body.rpm));
+      }
+      writeGatewayKeys();
+      writeJSON(PREFS_FILE, prefs, log);
+      // NOTE: the secret is returned only on mint. Persisted only as meta (no secret at rest in prefs).
+      return sendJSON(res, 200, {
+        ok: true, secret: key, label: body.label || "",
+        count: prefs.gatewayKeys.length, limit: keyLimit(key)
+      });
+    }
+    return sendJSON(res, 400, { error: "unknown gateway-keys action" });
+  }
+  if (req.method === "GET" && url === "/hub/gateway-keys") {
+    return sendJSON(res, 200, {
+      keys: (prefs.gatewayKeys || []).map(k => ({
+        key: k.slice(0, 7) + "…" + k.slice(-4), label: (gatewayKeysMeta[k] && gatewayKeysMeta[k].label) || "",
+        createdAt: (gatewayKeysMeta[k] && gatewayKeysMeta[k].createdAt) || 0,
+        lastUsedAt: (gatewayKeysMeta[k] && gatewayKeysMeta[k].lastUsedAt) || 0,
+        rpm: (keyLimit(k) && keyLimit(k).rpm) || 0, limit: keyLimit(k), used: keyUsed(k)
+      }))
+    });
   }
   if (url === "/hub/cache") {
     responseCache.clear();
     cacheHits = 0;
     return sendJSON(res, 200, { ok: true });
   }
+  if (url === "/hub/semcache") {
+    if (req.method === "GET") {
+      return sendJSON(res, 200, { ok: true, enabled: semOn, size: semCache.size(), ...semCfg() });
+    }
+    if (body.action === "clear") {
+      semCache.clear();
+      return sendJSON(res, 200, { ok: true, size: semCache.size() });
+    }
+    const f = prefs.features || (prefs.features = {});
+    if (typeof body.enabled === "boolean") f.semCache = body.enabled;
+    if (body.embedder !== undefined) {
+      if (body.embedder && !modelMap.has(body.embedder)) return sendJSON(res, 400, { error: "unknown embedder model" });
+      prefs.semCache = prefs.semCache || {};
+      prefs.semCache.embedder = body.embedder || "";
+    }
+    if (Number.isFinite(body.threshold)) {
+      prefs.semCache = prefs.semCache || {};
+      prefs.semCache.threshold = Math.min(1, Math.max(0, body.threshold));
+    }
+    writeJSON(PREFS_FILE, prefs, log);
+    return sendJSON(res, 200, { ok: true, enabled: semCfg().enabled, embedder: semCfg().embedder, threshold: semCfg().threshold });
+  }
   if (url === "/hub/keys") {
     if (req.method === "GET") {
-      const keys = (prefs.gatewayKeys || []).map(k => ({ key: k, limit: keyLimit(k), used: keyUsed(k) }));
+      const keys = (prefs.gatewayKeys || []).map(k => ({ key: k, limit: keyLimit(k), used: keyUsed(k), rpm: (keyLimit(k) && keyLimit(k).rpm) || 0 }));
       return sendJSON(res, 200, { keys });
     }
     // Bulk import provider keys: { "openai": "sk-...", "anthropic": "sk-...", ... }
@@ -1483,7 +1669,10 @@ const server = http.createServer(async (req, res) => {
       if (!controlAuthorized(req)) return sendJSON(res, 401, { error: "unauthorized" });
       return await handleControl(req, res, url);
     }
-    if (!OPEN_PATHS.has(url) && !gatewayAuthorized(req)) return sendJSON(res, 401, { error: "invalid or missing API key" });
+    if (!OPEN_PATHS.has(url)) {
+      const gw = gatewayAuthorized(req);
+      if (!gw.ok) return sendJSON(res, gw.code || 401, { error: gw.error || "unauthorized" });
+    }
 
     if (req.method === "GET" && (url === "/v1/models" || url === "/models")) {
       const profileData = Object.keys(prefs.profiles).map(name => ({
@@ -1921,6 +2110,12 @@ async function verifyHeads() {
         if (m && m.enabled && isChatModel(id) && !ids.includes(id)) ids.push(id);
       }
     }
+    // Aggiunge TUTTI i modelli abilitati (free e paid) così i test di verifica
+    // scoprono nuovi modelli free anche fuori dai profili. I paid verranno
+    // scartati da prunePaidModels() dopo i test.
+    for (const m of models) {
+      if (m.enabled && isChatModel(m.id) && !ids.includes(m.id)) ids.push(m.id);
+    }
     const pool = Math.max(2, PROV_CONCURRENCY);
     let i = 0;
     await Promise.all(Array.from({ length: pool }, async () => {
@@ -1939,7 +2134,8 @@ function startProfileRefresher() {
   setTimeout(() => { if (process.env.MODELHUB_VERIFY !== "0") verifyHeads(); }, 90000);
   const tick = () => {
     rebuildProfiles();
-    if (process.env.MODELHUB_VERIFY !== "0") verifyHeads();
+    if (process.env.MODELHUB_VERIFY !== "0") verifyHeads().then(() => prunePaidModels());
+    else prunePaidModels();
     setTimeout(tick, Math.max(30000, settingsCfg().verifyMs));
   };
   setTimeout(tick, Math.max(30000, settingsCfg().verifyMs));
@@ -2008,6 +2204,9 @@ function startHub() {
     authWasPlain = false;
     log("auth.json migrated to encrypted format");
   }
+  // enable semantic cache only when explicitly configured (default off)
+  semOn = !!(semCfg().enabled && semCfg().embedder);
+  log(`semantic cache ${semOn ? "enabled" : "disabled"} (embedder: ${semCfg().embedder || "none"})`);
   const listen = () => {
     server.listen(PORT, "127.0.0.1", () => log(`ModelHub listening on ${PORT}`));
     startBackgroundProber();
@@ -2017,12 +2216,15 @@ function startHub() {
     log("startup verify: testing profile heads...");
     verifyHeads().then(() => {
       log("startup verify done");
+      prunePaidModels();
       listen();
     }).catch(err => {
       log("startup verify error: " + err.message);
+      prunePaidModels();
       listen();
     });
   } else {
+    prunePaidModels();
     listen();
   }
 }
@@ -2036,6 +2238,7 @@ module.exports = {
   encryptAuth, decryptAuth, looksLikeAuth,
   priceFor, computeCost, effectivePrice, cascadeValid, deriveEndpoint,
   strategyFor, applyStrategy, selectCandidates, postWithFailover, controlAuthorized, gatewayAuthorized, startHub,
+  genKey, mintKey, rateLimited,
   __setState(state = {}) {
     if (Array.isArray(state.models)) { models = state.models; modelMap = new Map(state.models.map(m => [m.id, m])); }
     if (state.prefs) prefs = state.prefs;
