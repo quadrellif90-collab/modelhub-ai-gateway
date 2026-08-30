@@ -67,7 +67,7 @@ const SIGNUP_URLS = {
   xai: "https://console.x.ai",
   zai: "https://z.ai/manage-apikey/apikey-list"
 };
-const VERSION = "0.7.6";
+const VERSION = "0.7.7";
 let cacheOn = process.env.MODELHUB_CACHE !== "0";
 let autoProbeOn = AUTO_PROBE;
 const UA_HTTP = new http.Agent({ keepAlive: true, maxSockets: 64 });
@@ -149,6 +149,16 @@ if (!prefs.enabled) prefs.enabled = {};
 if (!prefs.profiles) prefs.profiles = {};
 if (!prefs.strategy || typeof prefs.strategy !== "object") prefs.strategy = {};
 if (!Array.isArray(prefs.gatewayKeys)) prefs.gatewayKeys = [];
+// modelFilter defaults
+if (!prefs.modelFilter || typeof prefs.modelFilter !== "object") prefs.modelFilter = {};
+const mf = prefs.modelFilter;
+mf.excludePaid = !!mf.excludePaid;
+mf.freeProvidersOnly = !!mf.freeProvidersOnly;
+mf.autoExcludeNonFree = !!mf.autoExcludeNonFree;
+mf.blacklist = Array.isArray(mf.blacklist) ? mf.blacklist.map(String) : [];
+mf.whitelist = Array.isArray(mf.whitelist) ? mf.whitelist.map(String) : [];
+if (!prefs.features) prefs.features = {};
+prefs.features.smartFallback = !!prefs.features.smartFallback;
 
 // ---------------------------------------------------------------------------
 // gateway keys: secrets live ONLY in prefs.gatewayKeys (memory + prefs.json),
@@ -303,17 +313,41 @@ function today() {
 
 function rebuildModels() {
   const list = [];
+  const mfilter = prefs.modelFilter || {};
+  const blacklist = new Set(mfilter.blacklist || []);
+  const whitelist = new Set(mfilter.whitelist || []);
   for (const p of config.providers) {
     const key = resolveKey(p.authId);
     const keyOk = !p.needsKey || !!key;
     for (const m of (p.models || [])) {
       const id = `${p.name}/${m.name}`;
       const knownFree = m.free === true || p.needsKey === false;
+      // Pricing: prompt=0 e completion=0 => free
+      const pr = m.pricing || {};
+      const isFreePrice = (Number(pr.prompt) || 0) === 0 && (Number(pr.completion) || 0) === 0;
+      const isFree = knownFree || isFreePrice;
+      // Metadati modello (con fallback sensati se non dichiarati in config)
+      const contextLength = m.contextLength || 0;
+      const architecture = m.architecture || (m.name || "").toLowerCase().includes("llama") ? "llama" : "unknown";
+      const modalities = Array.isArray(m.modalities) && m.modalities.length
+        ? m.modalities
+        : ["text"];
+      const updatedAt = m.updatedAt || "2025-01-01";
+      const freeLimit = m.freeLimit || (isFree ? "free tier (default)" : "paid");
       const prev = modelMap.get(id);
+      // Applica filtri utente
+      if (blacklist.has(id)) continue;
+      if (mfilter.autoExcludeNonFree && !isFree) continue;
+      if (mfilter.excludePaid && !isFree) continue;
+      if (mfilter.freeProvidersOnly && !isFree) continue;
+      // whitelist mode: se whitelist non vuota, mostra solo i modelli in essa
+      if (whitelist.size > 0 && !whitelist.has(id)) continue;
       list.push({
         id, provider: p.name, label: p.label || p.name, name: m.name,
         baseURL: p.baseURL, authId: p.authId, needsKey: !!p.needsKey,
-        free: prev ? prev.free : knownFree,
+        free: prev ? prev.free : isFree,
+        isFree: prev ? prev.isFree : isFree,
+        contextLength, architecture, modalities, updatedAt, freeLimit,
         key, keyOk, enabled: prev ? prev.enabled : (prefs.enabled[id] !== false),
         healthy: true, fails: prev ? prev.fails : 0, failUntil: prev ? prev.failUntil : 0,
         halfOpen: false, lastError: prev ? prev.lastError : "",
@@ -594,7 +628,8 @@ function featuresCfg() {
   const f = prefs.features || (prefs.features = {});
   return {
     cache: typeof f.cache === "boolean" ? f.cache : cacheOn,
-    autoProbe: typeof f.autoProbe === "boolean" ? f.autoProbe : autoProbeOn
+    autoProbe: typeof f.autoProbe === "boolean" ? f.autoProbe : autoProbeOn,
+    smartFallback: !!f.smartFallback
   };
 }
 function enhancerCfg() {
@@ -815,6 +850,9 @@ async function postWithFailover(openaiBody, key) {
   const chainStart = Date.now();
   const CHAIN_BUDGET = settingsCfg().failoverMs;
   let lastError = "all upstreams failed";
+  // smart fallback abilitato: se un modello fallisce con 429, aggiungi un
+  // modello libero alternativo con stessa architettura/contextLength
+  const smartFb = !!(prefs.features && prefs.features.smartFallback);
   while (candidates.length) {
     const id = candidates.shift();
     const m = modelMap.get(id);
@@ -822,7 +860,24 @@ async function postWithFailover(openaiBody, key) {
     if (Date.now() - chainStart > CHAIN_BUDGET) { lastError = "failover budget exhausted"; break; }
     tried.push(id);
     const r = await postNonStreaming(m, { ...openaiBody, model: m.name }, key);
-    if (!r.ok) { lastError = `${id}: ${r.error}`; continue; }
+    if (!r.ok) {
+      lastError = `${id}: ${r.error}`;
+      // Smart fallback su 429: aggiungi un modello libero alternativo
+      if (smartFb && r.httpCode === 429) {
+        const arch = m.architecture || "unknown";
+        const ctx = m.contextLength || 0;
+        const alt = models.find(x =>
+          x.enabled && x.isFree && x.id !== m.id &&
+          (x.architecture === arch || (!x.architecture && !arch)) &&
+          (!ctx || !x.contextLength || Math.abs((x.contextLength || 0) - ctx) <= ctx * 0.5)
+        );
+        if (alt && !tried.includes(alt.id)) {
+          log(`smartFallback: ${m.id} (429) -> ${alt.id}`);
+          candidates.unshift(alt.id);
+        }
+      }
+      continue;
+    }
     if (!cascadeValid(r.data)) {
       lastError = `${id}: skipped (empty/invalid content)`;
       continue;
@@ -1220,6 +1275,7 @@ function controlState() {
     semCache: { enabled: semOn, size: semCache.size(), threshold: semCfg().threshold, embedder: semCfg().embedder },
     cache: { enabled: cacheOn, size: responseCache.size, hits: cacheHits, ttlMs: CACHE_TTL_MS },
     features: featuresCfg(),
+    modelFilter: prefs.modelFilter || {},
     settings: settingsCfg(),
     experiments: prefs.experiments || null,
     alerts: prefs.alerts || null,
@@ -1228,7 +1284,13 @@ function controlState() {
     totals: { req: totals.req, tok: totals.tok, cost: Math.round(totals.cost * 1e4) / 1e4, lifetimeCost: Math.round(totals.lifetimeCost * 1e4) / 1e4, healthy: totals.healthy },
     models: models.map(m => ({
       id: m.id, provider: m.provider, label: m.label, name: m.name,
-      free: m.free, enabled: m.enabled, keyOk: m.keyOk,
+      free: m.free, isFree: !!m.isFree,
+      contextLength: m.contextLength || 0,
+      architecture: m.architecture || "unknown",
+      modalities: m.modalities || ["text"],
+      updatedAt: m.updatedAt || "",
+      freeLimit: m.freeLimit || "",
+      enabled: m.enabled, keyOk: m.keyOk,
       healthy: !m.failUntil || m.failUntil <= Date.now(),
       verified: !!m.verified, lastVerifiedAt: m.lastVerifiedAt || 0,
       fails: m.fails, lastError: m.lastError, lastLatencyMs: m.lastLatencyMs,
@@ -1355,6 +1417,35 @@ async function handleControl(req, res, url) {
     writeJSON(PREFS_FILE, prefs, log);
     rebuildProfiles();
     return sendJSON(res, 200, { ok: true });
+  }
+  if (url === "/hub/model-filter" && req.method === "POST") {
+    const f = prefs.modelFilter || (prefs.modelFilter = {});
+    if (typeof body.excludePaid === "boolean") f.excludePaid = body.excludePaid;
+    if (typeof body.freeProvidersOnly === "boolean") f.freeProvidersOnly = body.freeProvidersOnly;
+    if (typeof body.autoExcludeNonFree === "boolean") f.autoExcludeNonFree = body.autoExcludeNonFree;
+    if (Array.isArray(body.blacklist)) f.blacklist = body.blacklist.map(String).filter(Boolean);
+    if (Array.isArray(body.whitelist)) f.whitelist = body.whitelist.map(String).filter(Boolean);
+    if (typeof body.smartFallback === "boolean") {
+      if (!prefs.features) prefs.features = {};
+      prefs.features.smartFallback = body.smartFallback;
+    }
+    writeJSON(PREFS_FILE, prefs, log);
+    rebuildModels();
+    return sendJSON(res, 200, { ok: true, modelFilter: prefs.modelFilter, smartFallback: !!(prefs.features && prefs.features.smartFallback) });
+  }
+  if (url === "/hub/model-filter/blacklist" && req.method === "POST") {
+    const f = prefs.modelFilter || (prefs.modelFilter = {});
+    if (!Array.isArray(f.blacklist)) f.blacklist = [];
+    if (body.action === "add" && body.id) {
+      if (!f.blacklist.includes(body.id)) f.blacklist.push(String(body.id));
+    } else if (body.action === "remove" && body.id) {
+      f.blacklist = f.blacklist.filter(x => x !== String(body.id));
+    } else if (body.action === "clear") {
+      f.blacklist = [];
+    }
+    writeJSON(PREFS_FILE, prefs, log);
+    rebuildModels();
+    return sendJSON(res, 200, { ok: true, blacklist: f.blacklist });
   }
   if (url === "/hub/reorder" && Array.isArray(body.order)) {
     const prof = body.profile || "auto";

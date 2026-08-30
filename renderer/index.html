@@ -177,6 +177,29 @@
       </section>
 
       <section class="panel">
+        <h2>Filtri modelli</h2>
+        <p class="hint">Escludi modelli a pagamento, mostra solo free, auto-escludi non-free, blacklist manuale. Smart fallback passa a un modello libero su 429.</p>
+        <label class="check"><input id="mfExcludePaid" type="checkbox" /> escludi modelli a pagamento</label>
+        <label class="check"><input id="mfFreeOnly" type="checkbox" /> solo provider free (nascondi paid)</label>
+        <label class="check"><input id="mfAutoExclude" type="checkbox" /> auto-escludi modelli non-free</label>
+        <label class="check"><input id="mfSmartFallback" type="checkbox" /> smart fallback (429 → modello libero simile)</label>
+        <div class="row">
+          <button id="mfSave" class="btn primary">Salva filtri</button>
+          <span id="mfMsg" class="msg"></span>
+        </div>
+        <h3>Esclusione manuale (blacklist)</h3>
+        <p class="hint">Aggiungi <code>provider:modello</code> per nasconderlo sempre. Le voci nella tabella sotto hanno il pulsante "Escludi".</p>
+        <div class="row">
+          <input id="mfBlackAdd" placeholder="provider:modello" style="width:55%" />
+          <button id="mfBlackAddBtn" class="btn">+ Aggiungi</button>
+        </div>
+        <div id="mfBlackList" class="gwlist"></div>
+        <div class="row">
+          <button id="mfBlackClear" class="btn danger">Ripristina tutti</button>
+        </div>
+      </section>
+
+      <section class="panel">
         <h2>Aggiungi provider</h2>
         <div class="form">
           <input id="np_name" placeholder="nome (es. openai)" />

@@ -13,7 +13,15 @@
   },
   "features": {
     "cache": true,
-    "autoProbe": true
+    "autoProbe": true,
+    "smartFallback": false
+  },
+  "modelFilter": {
+    "excludePaid": false,
+    "freeProvidersOnly": false,
+    "autoExcludeNonFree": false,
+    "blacklist": [],
+    "whitelist": []
   },
   "enabled": {},
   "profiles": {

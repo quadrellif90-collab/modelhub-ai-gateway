@@ -35,6 +35,7 @@ async function poll() {
     document.getElementById("serverText").textContent = up ? `server attivo :${s.port}` : "server offline";
     if (s) {
       render(s);
+      renderModelFilter(s);
       renderLogs(l.logs || []);
       updateLastModel(l.logs || []);
     }
@@ -763,18 +764,99 @@ function flash(msg) {
 }
 
 
-// theme toggle (dark/light), persisted
-(function () {
-  const btn = document.getElementById("themeBtn");
-  function apply(t) {
-    document.body.classList.toggle("light", t === "light");
-    try { localStorage.setItem("mh-theme", t); } catch {}
-  }
-  btn.onclick = () => apply(document.body.classList.contains("light") ? "dark" : "light");
-  let saved = "dark";
-  try { saved = localStorage.getItem("mh-theme") || "dark"; } catch {}
-  apply(saved);
-})();
+// --- Filtri modelli ---
+function renderModelFilter(state) {
+  const mf = (state && state.modelFilter) || {};
+  document.getElementById("mfExcludePaid").checked = !!mf.excludePaid;
+  document.getElementById("mfFreeOnly").checked = !!mf.freeProvidersOnly;
+  document.getElementById("mfAutoExclude").checked = !!mf.autoExcludeNonFree;
+  const smart = !!(state && state.features && state.features.smartFallback);
+  document.getElementById("mfSmartFallback").checked = smart;
+  renderBlacklist(mf.blacklist || []);
+}
+function renderBlacklist(list) {
+  const el = document.getElementById("mfBlackList");
+  if (!el) return;
+  if (!list.length) { el.innerHTML = '<p class="hint">nessuna esclusione</p>'; return; }
+  el.innerHTML = list.map(id =>
+    `<div class="gwitem"><span class="gwsub">${esc(id)}</span><button class="btn danger gw-del" data-id="${esc(id)}">Rimuovi</button></div>`
+  ).join("");
+  el.querySelectorAll(".gw-del").forEach(b => {
+    b.onclick = async () => {
+      await api("/hub/model-filter/blacklist", "POST", { action: "remove", id: b.dataset.id });
+      poll();
+    };
+  });
+}
+document.getElementById("mfSave").onclick = async () => {
+  const body = {
+    excludePaid: document.getElementById("mfExcludePaid").checked,
+    freeProvidersOnly: document.getElementById("mfFreeOnly").checked,
+    autoExcludeNonFree: document.getElementById("mfAutoExclude").checked,
+    smartFallback: document.getElementById("mfSmartFallback").checked
+  };
+  const r = await api("/hub/model-filter", "POST", body);
+  document.getElementById("mfMsg").textContent = r.ok ? "salvato ✓" : ("errore: " + (r.error || ""));
+  poll();
+};
+document.getElementById("mfBlackAddBtn").onclick = async () => {
+  const v = document.getElementById("mfBlackAdd").value.trim();
+  if (!v) return;
+  const r = await api("/hub/model-filter/blacklist", "POST", { action: "add", id: v });
+  if (r.ok) document.getElementById("mfBlackAdd").value = "";
+  poll();
+};
+document.getElementById("mfBlackClear").onclick = async () => {
+  await api("/hub/model-filter/blacklist", "POST", { action: "clear" });
+  poll();
+};
 
-poll();
+// estende il rendering dei modelli con badge free / metadati / pulsante escludi
+const _origRenderProviders = window.renderProviders;
+function renderProvidersWithMeta(state) {
+  if (typeof _origRenderProviders === "function") _origRenderProviders(state);
+  const blacklist = (state && state.modelFilter && state.modelFilter.blacklist) || [];
+  document.querySelectorAll(".model-row").forEach(row => {
+    const id = row.dataset.id;
+    if (!id) return;
+    const m = (state.models || []).find(x => x.id === id);
+    if (!m) return;
+    const nameEl = row.querySelector(".model-name");
+    if (!nameEl) return;
+    let badge = row.querySelector(".mf-badge");
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = "mf-badge";
+      nameEl.after(badge);
+    }
+    badge.textContent = m.isFree ? "FREE" : "PAID";
+    badge.classList.toggle("free", !!m.isFree);
+    badge.classList.toggle("paid", !m.isFree);
+    let meta = row.querySelector(".mf-meta");
+    if (!meta) {
+      meta = document.createElement("span");
+      meta.className = "mf-meta";
+      nameEl.after(meta);
+    }
+    const mods = (m.modalities || []).join("/");
+    meta.textContent = ` · ${m.contextLength ? (m.contextLength / 1000) + "k ctx" : ""} · ${m.architecture || "?"} · ${mods}`;
+    if (!blacklist.includes(id)) {
+      let btn = row.querySelector(".mf-exclude");
+      if (!btn) {
+        btn = document.createElement("button");
+        btn.className = "btn danger mf-exclude";
+        btn.textContent = "Escludi";
+        btn.style.marginLeft = "6px";
+        row.appendChild(btn);
+      }
+      btn.onclick = async () => {
+        await api("/hub/model-filter/blacklist", "POST", { action: "add", id });
+        poll();
+      };
+    }
+  });
+}
+if (typeof window.renderProviders === "function") window.renderProviders = renderProvidersWithMeta;
+
+
 setInterval(poll, 3000);
