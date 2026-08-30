@@ -112,9 +112,14 @@ function setAutoStart(on) {
 
 function setupAutoUpdate() {
   if (!app.isPackaged) return;
+  // Auto-update disabilitato di default: l'utente aggiorna tramite installer
+  // firmato (dist/ModelHub Setup X.Y.Z.exe). Il check automatico su GitHub
+  // genera solo errori di rete/rate-limit non gestibili in background.
+  // Riattivabile con MODELHUB_AUTO_UPDATE=1.
+  if (process.env.MODELHUB_AUTO_UPDATE !== "1") return;
   try {
     const { autoUpdater } = require("electron-updater");
-    autoUpdater.autoDownload = true;
+    autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = true;
     autoUpdater.checkForUpdates().catch(() => {});
     setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 6 * 60 * 60 * 1000);
