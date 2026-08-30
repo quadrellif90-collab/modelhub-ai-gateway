@@ -10,7 +10,8 @@ Il formato segue [Keep a Changelog](https://keepachangelog.com/) e il versioning
 - **Mint/revoke/limit via API**: `POST /hub/gateway-keys` con `action: mint | revoke | limit` (keyed per `kid`, non per secret). `GET /hub/gateway-keys` e `GET /hub/keys` espongono `kid`, label, createdAt, lastUsedAt, quota e uso — **mai il secret**.
 - **Rate-limit per chiave (rpm)**: finestra scorrevole 60s, codice `429` distinto dal `401` (chiave assente/invalida). Configurabile per chiave (token/spesa/rpm).
 - **Cache semantica** (layer opzionale sopra l'exact-match): embedding del prompt utente → similarità coseno; hit su prompt vicini alla stessa soglia (default 0.95). Disattivata di default; attivabile dal pannello "Cache semantica" scegliendo un modello embedder dal registry. Endpoint `POST /hub/semcache` (abilita/embedder/soglia/clear).
-- **Segretezza delle chiavi gateway**: il secret non viene più persistito in chiaro. `gateway-keys.json` memorizza solo l'hash `kid` (SHA-256) + metadati; il secret vive in memoria e in `prefs.json` (come le API key provider, cifrate su disco).
+- **Scadenza chiavi gateway**: `mint` accetta `expiresInDays`; le chiavi scadute vengono rifiutate con `401` (distinto da revocate/assenti). Visibile in UI ("scade <data>") e nello state (`expiresAt`).
+- **Export/Import integro**: l'import reinserisce le chiavi gateway da `prefs.gatewayKeys` e ricostruisce la mappa di autenticazione, così un backup ripristina le chiavi valide.
 
 ### Changed
 - `gatewayAuthorized` ritorna ora `{ ok, code, error, key }` (prima booleano) per distinguere 401 (auth) da 429 (quota/rpm).

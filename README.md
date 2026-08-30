@@ -63,7 +63,7 @@ curl http://127.0.0.1:8787/v1/chat/completions \
 | `POST /hub/enhancer` | Configura il prompt enhancer (enabled/model/maxChars/timeoutMs) |
 | `POST /hub/features` | Toggle cache e probe automatico |
 | `POST /hub/key/reveal` | Rivela una API key salvata |
-| `POST /hub/gateway-keys` | Gestione chiavi gateway: `action: mint \| revoke \| limit` (mint ritorna il secret una sola volta; limit accetta `kid`, `tokens`, `spend`, `rpm`) |
+| `POST /hub/gateway-keys` | Gestione chiavi gateway: `action: mint \| revoke \| limit` (mint: `label`, `rpm`, `expiresInDays`; ritorna il secret una sola volta; limit accetta `kid`, `tokens`, `spend`, `rpm`) |
 | `GET /hub/gateway-keys` | Elenco chiavi (kid, label, quota, uso) — mai il secret |
 | `POST /hub/semcache` | Cache semantica: `{enabled, embedder, threshold}` o `{action:"clear"}` |
 

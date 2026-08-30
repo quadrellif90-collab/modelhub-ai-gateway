@@ -306,7 +306,7 @@ function renderGatewayKeys(s) {
   const list = document.getElementById("gwList");
   const keys = (s.gatewayKeys || []).map(k => ({
     kid: k.kid, label: k.label || "", createdAt: k.createdAt || 0, lastUsedAt: k.lastUsedAt || 0,
-    rpm: k.rpm || 0, used: k.used || { tokens: 0, spent: 0 }
+    expiresAt: k.expiresAt || 0, rpm: k.rpm || 0, used: k.used || { tokens: 0, spent: 0 }
   }));
   if (!keys.length) {
     list.innerHTML = `<div class="hint" style="padding:6px">nessuna chiave — genera la prima con il pulsante sopra.</div>`;
@@ -323,7 +323,7 @@ function renderGatewayKeys(s) {
         <span class="badge keyok">${esc(k.label || "senza nome")}</span>
         ${k.rpm ? `<span class="badge">${k.rpm} rpm</span>` : ""}
       </div>
-      <div class="gwsub">creata ${k.createdAt ? new Date(k.createdAt).toLocaleDateString() : "?"} · ultimo uso ${k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleString() : "mai"} · ${used}</div>
+      <div class="gwsub">creata ${k.createdAt ? new Date(k.createdAt).toLocaleDateString() : "?"} · ultimo uso ${k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleString() : "mai"} · ${used}${k.expiresAt ? " · scade " + new Date(k.expiresAt).toLocaleDateString() : ""}</div>
       <div class="gwactions">
         <button class="btn mini gw-limit" data-kid="${esc(k.kid)}" title="Imposta quota/rpm">quota</button>
         <button class="btn mini danger gw-revoke" data-kid="${esc(k.kid)}" title="Revoca chiave">revoca</button>
@@ -574,7 +574,8 @@ document.getElementById("bulkImport").onclick = async () => {
 document.getElementById("gwMint").onclick = async () => {
   const label = document.getElementById("gwLabel").value.trim();
   const rpm = Number(document.getElementById("gwRpm").value) || 0;
-  const r = await api("/hub/gateway-keys", "POST", { action: "mint", label, rpm });
+  const exp = Number(document.getElementById("gwExp").value) || 0;
+  const r = await api("/hub/gateway-keys", "POST", { action: "mint", label, rpm, expiresInDays: exp });
   if (r && r.secret) {
     const box = document.getElementById("gwNew");
     box.style.display = "block";

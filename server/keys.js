@@ -12,14 +12,14 @@ function kidOf(secret) {
   return "mh-" + crypto.createHash("sha256").update(secret).digest("hex").slice(0, 16);
 }
 
-// Mint a new key with metadata. Returns the secret (shown once) + meta record.
-function mintKey(label) {
+// Mint a new key with metadata. `expiresInDays` (optional, >0) sets an expiry.
+function mintKey(label, expiresInDays) {
   const key = genKey();
-  return {
-    key,
-    kid: kidOf(key),
-    meta: { label: typeof label === "string" ? label : "", createdAt: Date.now(), lastUsedAt: 0 }
-  };
+  const meta = { label: typeof label === "string" ? label : "", createdAt: Date.now(), lastUsedAt: 0 };
+  if (Number.isFinite(expiresInDays) && expiresInDays > 0) {
+    meta.expiresAt = Date.now() + Math.floor(expiresInDays) * 86400000;
+  }
+  return { key, kid: kidOf(key), meta };
 }
 
 // Sliding 60s-window rate check. `bucket` is an array of epoch-ms timestamps

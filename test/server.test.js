@@ -317,6 +317,30 @@ describe("gateway keys", () => {
   });
 });
 
+describe("mintKey", () => {
+  const keys = require("../server/keys.js");
+  test("generates prefixed secret + kid and default meta", () => {
+    const { key, kid, meta } = keys.mintKey("app-x");
+    assert.ok(key.startsWith("mh_"));
+    assert.ok(kid.startsWith("mh-"));
+    assert.strictEqual(meta.label, "app-x");
+    assert.ok(meta.createdAt > 0);
+    assert.strictEqual(meta.expiresAt, undefined);
+  });
+  test("sets expiresAt when expiresInDays > 0", () => {
+    const { meta } = keys.mintKey("temp", 7);
+    assert.ok(meta.expiresAt > Date.now());
+    const diffDays = Math.round((meta.expiresAt - Date.now()) / 86400000);
+    assert.ok(diffDays >= 6 && diffDays <= 7);
+  });
+  test("kid is stable sha256 of secret", () => {
+    const { key, kid } = keys.mintKey();
+    const crypto = require("node:crypto");
+    const expected = "mh-" + crypto.createHash("sha256").update(key).digest("hex").slice(0, 16);
+    assert.strictEqual(kid, expected);
+  });
+});
+
 describe("semantic cache", () => {
   const sem = require("../server/semcache.js");
   test("matches near-identical embeddings above threshold", () => {

@@ -94,8 +94,9 @@
               <h2>Chiavi gateway</h2>
               <p class="hint">Le app collegate devono inviare <code>Authorization: Bearer &lt;key&gt;</code> (o <code>x-api-key</code>). Se vuoto = nessuna protezione. Le chiavi sono mostrate una sola volta al momento della creazione.</p>
               <div class="row">
-                <input id="gwLabel" placeholder="etichetta (es. app-ios)" style="width:60%" />
-                <input id="gwRpm" type="number" min="0" placeholder="rpm (0=∞)" style="width:38%" />
+                <input id="gwLabel" placeholder="etichetta (es. app-ios)" style="width:40%" />
+                <input id="gwRpm" type="number" min="0" placeholder="rpm (0=∞)" style="width:28%" />
+                <input id="gwExp" type="number" min="0" placeholder="scadenza giorni (0=∞)" style="width:30%" />
               </div>
               <div class="row">
                 <button id="gwMint" class="btn primary">+ Genera nuova chiave</button>

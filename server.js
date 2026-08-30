@@ -1071,6 +1071,10 @@ function gatewayAuthorized(req) {
   if (!gatewayKids.size) return { ok: true, key: null };
   const kid = resolveGatewayKid(secret);
   if (!kid) return { ok: false, code: 401, error: "invalid or missing API key", key: null };
+  const gwMeta = gatewayKeysMeta[kid];
+  if (gwMeta && gwMeta.expiresAt && Date.now() > gwMeta.expiresAt) {
+    return { ok: false, code: 401, error: "API key expired", key: kid };
+  }
   const limitKey = secret; // keyLimit reads prefs.keylimits keyed by secret
   if (keyOverLimit(limitKey)) return { ok: false, code: 429, error: "key quota reached", key: kid };
   // per-key requests-per-minute (sliding 60s window)
@@ -1207,6 +1211,7 @@ function controlState() {
       label: (gatewayKeysMeta[kid] && gatewayKeysMeta[kid].label) || "",
       createdAt: (gatewayKeysMeta[kid] && gatewayKeysMeta[kid].createdAt) || 0,
       lastUsedAt: (gatewayKeysMeta[kid] && gatewayKeysMeta[kid].lastUsedAt) || 0,
+      expiresAt: (gatewayKeysMeta[kid] && gatewayKeysMeta[kid].expiresAt) || 0,
       // prefs.keylimits is keyed by secret; look up via the in-memory secret
       limit: keyLimit(gatewayKids.get(kid) || kid),
       used: keyUsed(gatewayKids.get(kid) || kid),
@@ -1305,6 +1310,11 @@ async function handleControl(req, res, url) {
       pricing = inc.pricing;
       writeJSON(PRICING_FILE, pricing);
     }
+    // Rebuild the gateway-key map from the (possibly imported) secrets in prefs.
+    gatewayKids.clear();
+    for (const secret of (prefs.gatewayKeys || [])) gatewayKids.set(kidOf(secret), secret);
+    // Re-sync persisted kids file against the live map
+    writeGatewayKeys();
     rebuildModels();
     return sendJSON(res, 200, { ok: true, imported });
   }
@@ -1465,9 +1475,10 @@ async function handleControl(req, res, url) {
       writeJSON(PREFS_FILE, prefs, log);
       return sendJSON(res, 200, { ok: true, kid: body.kid, limit: keyLimit(sec) });
     }
-    // Mint a new key (optionally labelled + initial limits)
+    // Mint a new key (optionally labelled + initial limits + expiry)
     if (body.action === "mint" || body.mint || !body.action) {
-      const { key, kid, meta } = mintKey(body.label);
+      const expDays = Number(body.expiresInDays);
+      const { key, kid, meta } = mintKey(body.label, Number.isFinite(expDays) && expDays > 0 ? expDays : undefined);
       prefs.gatewayKeys.push(key);
       gatewayKids.set(kid, key);
       gatewayKeysMeta[kid] = meta;
@@ -1493,6 +1504,7 @@ async function handleControl(req, res, url) {
         kid, label: (gatewayKeysMeta[kid] && gatewayKeysMeta[kid].label) || "",
         createdAt: (gatewayKeysMeta[kid] && gatewayKeysMeta[kid].createdAt) || 0,
         lastUsedAt: (gatewayKeysMeta[kid] && gatewayKeysMeta[kid].lastUsedAt) || 0,
+        expiresAt: (gatewayKeysMeta[kid] && gatewayKeysMeta[kid].expiresAt) || 0,
         rpm: (keyLimit(gatewayKids.get(kid) || kid) && keyLimit(gatewayKids.get(kid) || kid).rpm) || 0,
         limit: keyLimit(gatewayKids.get(kid) || kid), used: keyUsed(gatewayKids.get(kid) || kid)
       }))
