@@ -1401,6 +1401,7 @@ async function handleControl(req, res, url) {
     const f = prefs.features || (prefs.features = {});
     if (typeof body.cache === "boolean") { f.cache = body.cache; cacheOn = body.cache; }
     if (typeof body.autoProbe === "boolean") { f.autoProbe = body.autoProbe; autoProbeOn = body.autoProbe; }
+    if (typeof body.smartFallback === "boolean") f.smartFallback = body.smartFallback;
     if (typeof body.startMinimized === "boolean") f.startMinimized = body.startMinimized;
     writeJSON(PREFS_FILE, prefs, log);
     return sendJSON(res, 200, { ok: true, features: featuresCfg() });
