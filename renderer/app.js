@@ -523,9 +523,8 @@ document.getElementById("profileSelect").onchange = (e) => {
 // ripristina l'ultimo profilo selezionato
 try { const sp = localStorage.getItem("mh-profile"); if (sp) selectedProfile = sp; } catch {}
 document.getElementById("settingsBtn").onclick = () => {
-  // apre la finestra popup Impostazioni (stesso origin Electron)
-  const t = (location.search || "");
-  window.open("settings.html" + t, "ModelHubSettings", "width=560,height=720,resizable=yes");
+  // instradato dal main.js (setWindowOpenHandler -> createSettingsWindow)
+  window.open("modelhub://settings");
 };
 document.getElementById("strategySelect").onchange = async (e) => {
   await api("/hub/strategy", "POST", { profile: selectedProfile, strategy: e.target.value });

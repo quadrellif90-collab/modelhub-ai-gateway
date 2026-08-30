@@ -147,7 +147,18 @@ function createWindow() {
   win.loadFile(path.join(DIR, "renderer", "index.html"), CTRL_TOKEN ? { query: { t: CTRL_TOKEN } } : undefined);
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (url === "modelhub://widget") { toggleWidget(); return { action: "deny" }; }
-    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    if (url === "modelhub://settings") { createSettingsWindow(); return { action: "deny" }; }
+    if (/^https?:\/\//i.test(url)) { shell.openExternal(url); return { action: "deny" }; }
+    // Apri file locali (settings.html, widget.html) come nuove finestre Electron
+    if (/^[a-z-]+\.html/i.test(url) || url.startsWith("file://")) {
+      const name = url.split("?")[0].split("#")[0].replace(/^.*\//, "");
+      const w = new BrowserWindow({
+        width: 560, height: 720, show: true, frame: true, resizable: true, icon: ICON,
+        webPreferences: { nodeIntegration: false, contextIsolation: true }
+      });
+      w.loadFile(path.join(DIR, "renderer", name), CTRL_TOKEN ? { query: { t: CTRL_TOKEN } } : undefined);
+      return { action: "deny" };
+    }
     return { action: "deny" };
   });
   if (!(prefs.features && prefs.features.startMinimized && launchedAtLogin)) win.show();

@@ -220,6 +220,15 @@
       </section>
     </aside>
 
+    <script>
+      // Passa il token di controllo all'iframe del widget così può fare fetch autenticati
+      (function () {
+        const t = new URLSearchParams(location.search).get("t") || "";
+        const f = document.getElementById("widgetFrame");
+        if (f && t) f.src = "widget.html?t=" + encodeURIComponent(t);
+      })();
+    </script>
+
     <section class="activity">
       <div class="panel wide">
         <h2>Classifica autoroute <span class="count">top 30 · punteggio dinamico</span></h2>
