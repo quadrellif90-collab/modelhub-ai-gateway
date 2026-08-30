@@ -131,7 +131,7 @@ function createWindow() {
     if (/^https?:\/\//i.test(url)) shell.openExternal(url);
     return { action: "deny" };
   });
-  if (!(prefs.features && prefs.features.startMinimized)) win.show();
+  if (!(prefs.features && prefs.features.startMinimized && launchedAtLogin)) win.show();
   else win.hide();
   win.on("close", (e) => {
     if (isQuitting) return;
@@ -167,12 +167,12 @@ app.on("second-instance", () => showWindow());
 
 app.whenReady().then(() => {
   try { if (!app.getLoginItemSettings().openAtLogin) setAutoStart(true); } catch {}
+  const launchedAtLogin = app.getLoginItemSettings().wasOpenedAtLogin;
   startServer();
   createWindow();
   createTray();
   createWidget();
   setupAutoUpdate();
-  const launchedAtLogin = app.getLoginItemSettings().wasOpenedAtLogin;
   if (!launchedAtLogin) setTimeout(showWindow, 600);
 });
 
