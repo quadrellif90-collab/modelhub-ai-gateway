@@ -18,6 +18,7 @@
       <span id="serverText">server…</span>
     </div>
     <div class="actions">
+      <button id="settingsBtn" class="btn" title="Apri impostazioni">Impostazioni</button>
       <button id="exportBtn" class="btn" title="Esporta config completa (incluse API keys)">Export</button>
       <button id="widgetBtn" class="btn" title="Apri/chiudi il widget realtime">Widget</button>
       <button id="themeBtn" class="btn" title="Cambia tema">Tema</button>
@@ -211,6 +212,11 @@
           <button id="scanBtn" class="btn">Scansiona tutti i cataloghi</button>
           <div id="scanOut" class="hint"></div>
         </div>
+      </section>
+
+      <section class="panel widget-embed">
+        <h2>Widget realtime</h2>
+        <iframe id="widgetFrame" src="widget.html" title="Widget realtime" loading="lazy"></iframe>
       </section>
     </aside>
 

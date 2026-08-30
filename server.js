@@ -1430,6 +1430,7 @@ async function handleControl(req, res, url) {
     if (typeof body.excludePaid === "boolean") f.excludePaid = body.excludePaid;
     if (typeof body.freeProvidersOnly === "boolean") f.freeProvidersOnly = body.freeProvidersOnly;
     if (typeof body.autoExcludeNonFree === "boolean") f.autoExcludeNonFree = body.autoExcludeNonFree;
+    if (typeof body.dailyLimit === "number") f.dailyLimit = Math.max(0, body.dailyLimit | 0);
     if (Array.isArray(body.blacklist)) f.blacklist = body.blacklist.map(String).filter(Boolean);
     if (Array.isArray(body.whitelist)) f.whitelist = body.whitelist.map(String).filter(Boolean);
     if (typeof body.smartFallback === "boolean") {

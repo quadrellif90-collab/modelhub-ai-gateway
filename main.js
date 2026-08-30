@@ -68,13 +68,25 @@ function startServer() {
 
 function createWidget() {
   widget = new BrowserWindow({
-    width: 360, height: 300, show: false, frame: false,
+    width: 360, height: 320, show: false, frame: false,
     alwaysOnTop: true, skipTaskbar: true, resizable: false,
     icon: ICON,
     webPreferences: { nodeIntegration: false, contextIsolation: true }
   });
   widget.loadFile(path.join(DIR, "renderer", "widget.html"), CTRL_TOKEN ? { query: { t: CTRL_TOKEN } } : undefined);
   widget.on("closed", () => { widget = null; });
+}
+
+let settingsWin = null;
+function createSettingsWindow() {
+  if (settingsWin) { settingsWin.show(); settingsWin.focus(); return; }
+  settingsWin = new BrowserWindow({
+    width: 560, height: 720, show: true, frame: true,
+    resizable: true, icon: ICON, title: "ModelHub — Impostazioni",
+    webPreferences: { nodeIntegration: false, contextIsolation: true }
+  });
+  settingsWin.loadFile(path.join(DIR, "renderer", "settings.html"), CTRL_TOKEN ? { query: { t: CTRL_TOKEN } } : undefined);
+  settingsWin.on("closed", () => { settingsWin = null; });
 }
 
 function toggleWidget() {
@@ -153,6 +165,7 @@ function createTray() {
   tray.setToolTip("ModelHub - aggregator locale");
   const template = [
     { label: "Apri pannello", click: () => showWindow() },
+    { label: "Impostazioni", click: () => createSettingsWindow() },
     { label: "Widget realtime", click: () => toggleWidget() },
     {
       label: "Avvio automatico a login",
@@ -164,7 +177,8 @@ function createTray() {
     { label: "Esci (ferma server)", click: () => quitApp() }
   ];
   tray.setContextMenu(Menu.buildFromTemplate(template));
-  tray.on("click", () => toggleWidget());
+  // Su Windows il click (e doppio clic) apre il pannello principale
+  tray.on("click", () => showWindow());
 }
 
 // single instance: avoid two servers
