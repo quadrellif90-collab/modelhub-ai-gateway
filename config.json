@@ -17519,6 +17519,1071 @@
       "authId": "free-llm-gateway",
       "baseURL": "http://localhost:8081/v1/chat/completions",
       "models": []
+    },
+    {
+      "name": "ofox",
+      "label": "ofox",
+      "baseURL": "https://api.ofox.ai/v1",
+      "authId": "ofox",
+      "needsKey": true,
+      "models": [
+        {
+          "name": "alibaba/happyhorse-1.0",
+          "free": false
+        },
+        {
+          "name": "alibaba/happyhorse-1.1",
+          "free": false
+        },
+        {
+          "name": "alibaba/wan-2.6",
+          "free": false
+        },
+        {
+          "name": "alibaba/wan-2.7",
+          "free": false
+        },
+        {
+          "name": "anthropic/claude-fable-5",
+          "free": false
+        },
+        {
+          "name": "anthropic/claude-haiku-4.5",
+          "free": false
+        },
+        {
+          "name": "anthropic/claude-opus-4.5",
+          "free": false
+        },
+        {
+          "name": "anthropic/claude-opus-4.6",
+          "free": false
+        },
+        {
+          "name": "anthropic/claude-opus-4.7",
+          "free": false
+        },
+        {
+          "name": "anthropic/claude-opus-4.8",
+          "free": false
+        },
+        {
+          "name": "anthropic/claude-opus-5",
+          "free": false
+        },
+        {
+          "name": "anthropic/claude-sonnet-4.5",
+          "free": false
+        },
+        {
+          "name": "anthropic/claude-sonnet-4.6",
+          "free": false
+        },
+        {
+          "name": "anthropic/claude-sonnet-5",
+          "free": false
+        },
+        {
+          "name": "bailian/qwen-flash",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "bailian/qwen-image-3.0",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "bailian/qwen-image-3.0-pro",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "bailian/qwen-max",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "bailian/qwen-plus",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "bailian/qwen-turbo",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "bailian/qwen-vl-max",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "bailian/qwen3-coder-flash",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "bailian/qwen3-coder-next",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "bailian/qwen3-coder-plus",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "bailian/qwen3-max",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "bailian/qwen3.5-122b-a10b",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "bailian/qwen3.5-27b",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "bailian/qwen3.5-35b-a3b",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "bailian/qwen3.5-397b-a17b",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "bailian/qwen3.5-flash",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "bailian/qwen3.5-plus",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "bailian/qwen3.6-27b",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "bailian/qwen3.6-flash",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "bailian/qwen3.6-max-preview",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "bailian/qwen3.6-plus",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "bailian/qwen3.7-max",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "bailian/qwen3.7-plus",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "bailian/qwen3.8-27b",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "bailian/qwen3.8-flash",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "bailian/qwen3.8-max",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "bailian/text-embedding-v4",
+          "free": false
+        },
+        {
+          "name": "bytedance/seedance-2.0",
+          "free": false
+        },
+        {
+          "name": "bytedance/seedance-2.0-fast",
+          "free": false
+        },
+        {
+          "name": "bytedance/seedance-2.0-mini",
+          "free": false
+        },
+        {
+          "name": "bytedance/seedance-2.5",
+          "free": false
+        },
+        {
+          "name": "deepseek/deepseek-v3.2",
+          "free": false
+        },
+        {
+          "name": "deepseek/deepseek-v4-flash-0423",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "deepseek/deepseek-v4-flash-0731",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "deepseek/deepseek-v4-flash-vision-exp",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "deepseek/deepseek-v4-pro-0423",
+          "free": false
+        },
+        {
+          "name": "deepseek/deepseek-v4-pro-0813",
+          "free": false
+        },
+        {
+          "name": "google/gemini-2.5-flash",
+          "free": false
+        },
+        {
+          "name": "google/gemini-2.5-flash-image",
+          "free": false
+        },
+        {
+          "name": "google/gemini-2.5-flash-lite",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "google/gemini-2.5-pro",
+          "free": false
+        },
+        {
+          "name": "google/gemini-3-flash-preview",
+          "free": false
+        },
+        {
+          "name": "google/gemini-3-pro-image",
+          "free": false
+        },
+        {
+          "name": "google/gemini-3.1-flash-image",
+          "free": false
+        },
+        {
+          "name": "google/gemini-3.1-flash-lite",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "google/gemini-3.1-flash-lite-image",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "google/gemini-3.1-pro-preview",
+          "free": false
+        },
+        {
+          "name": "google/gemini-3.5-flash",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "google/gemini-3.5-flash-lite",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "google/gemini-3.6-flash",
+          "free": false
+        },
+        {
+          "name": "google/gemini-3.7-flash",
+          "free": false
+        },
+        {
+          "name": "microsoft/mai-image-2.5",
+          "free": false
+        },
+        {
+          "name": "microsoft/mai-image-2.5-flash",
+          "free": false
+        },
+        {
+          "name": "microsoft/mai-image-2.5-pro",
+          "free": false
+        },
+        {
+          "name": "minimax/m2-her",
+          "free": false
+        },
+        {
+          "name": "minimax/minimax-m2",
+          "free": false
+        },
+        {
+          "name": "minimax/minimax-m2.1",
+          "free": false
+        },
+        {
+          "name": "minimax/minimax-m2.1-lightning",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "minimax/minimax-m2.5",
+          "free": false
+        },
+        {
+          "name": "minimax/minimax-m2.5-lightning",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "minimax/minimax-m2.7",
+          "free": false
+        },
+        {
+          "name": "minimax/minimax-m2.7-highspeed",
+          "free": false
+        },
+        {
+          "name": "minimax/minimax-m3",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "moonshotai/kimi-k2.5",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "moonshotai/kimi-k2.6",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "moonshotai/kimi-k2.7-code",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "moonshotai/kimi-k2.7-code-highspeed",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "moonshotai/kimi-k3",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "openai/gpt-4.1",
+          "free": false
+        },
+        {
+          "name": "openai/gpt-4.1-mini",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "openai/gpt-4o",
+          "free": false
+        },
+        {
+          "name": "openai/gpt-4o-mini",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "openai/gpt-4o-mini-transcribe",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "openai/gpt-4o-transcribe-diarize",
+          "free": false
+        },
+        {
+          "name": "openai/gpt-5",
+          "free": false
+        },
+        {
+          "name": "openai/gpt-5-mini",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "openai/gpt-5-nano",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "openai/gpt-5.1",
+          "free": false
+        },
+        {
+          "name": "openai/gpt-5.1-codex-max",
+          "free": false
+        },
+        {
+          "name": "openai/gpt-5.1-codex-mini",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "openai/gpt-5.2",
+          "free": false
+        },
+        {
+          "name": "openai/gpt-5.2-codex",
+          "free": false
+        },
+        {
+          "name": "openai/gpt-5.3-codex",
+          "free": false
+        },
+        {
+          "name": "openai/gpt-5.4",
+          "free": false
+        },
+        {
+          "name": "openai/gpt-5.4-mini",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "openai/gpt-5.4-nano",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "openai/gpt-5.4-pro",
+          "free": false
+        },
+        {
+          "name": "openai/gpt-5.5",
+          "free": false
+        },
+        {
+          "name": "openai/gpt-5.6-luna",
+          "free": false
+        },
+        {
+          "name": "openai/gpt-5.6-sol",
+          "free": false
+        },
+        {
+          "name": "openai/gpt-5.6-terra",
+          "free": false
+        },
+        {
+          "name": "openai/gpt-image-1.5",
+          "free": false
+        },
+        {
+          "name": "openai/gpt-image-2",
+          "free": false
+        },
+        {
+          "name": "openai/gpt-transcribe",
+          "free": false
+        },
+        {
+          "name": "openai/text-embedding-3-large",
+          "free": false
+        },
+        {
+          "name": "openai/text-embedding-3-small",
+          "free": false
+        },
+        {
+          "name": "volcengine/doubao-seed-1-6",
+          "free": false
+        },
+        {
+          "name": "volcengine/doubao-seed-1-6-flash",
+          "free": false
+        },
+        {
+          "name": "volcengine/doubao-seed-1-6-vision",
+          "free": false
+        },
+        {
+          "name": "volcengine/doubao-seed-1-8",
+          "free": false
+        },
+        {
+          "name": "volcengine/doubao-seed-2.0-code",
+          "free": false
+        },
+        {
+          "name": "volcengine/doubao-seed-2.0-lite",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "volcengine/doubao-seed-2.0-mini",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "volcengine/doubao-seed-2.0-pro",
+          "free": false
+        },
+        {
+          "name": "volcengine/doubao-seed-2.1-pro",
+          "free": false
+        },
+        {
+          "name": "volcengine/doubao-seed-2.1-turbo",
+          "free": false
+        },
+        {
+          "name": "volcengine/doubao-seed-character",
+          "free": false
+        },
+        {
+          "name": "volcengine/doubao-seed-evolving",
+          "free": false
+        },
+        {
+          "name": "volcengine/doubao-seedream-4.5",
+          "free": false
+        },
+        {
+          "name": "volcengine/doubao-seedream-5.0-lite",
+          "free": false
+        },
+        {
+          "name": "volcengine/doubao-seedream-5.0-pro",
+          "free": false
+        },
+        {
+          "name": "x-ai/grok-4.1-fast",
+          "free": false
+        },
+        {
+          "name": "x-ai/grok-4.20",
+          "free": false
+        },
+        {
+          "name": "x-ai/grok-4.3",
+          "free": false
+        },
+        {
+          "name": "x-ai/grok-4.5",
+          "free": false
+        },
+        {
+          "name": "x-ai/grok-4.6",
+          "free": false
+        },
+        {
+          "name": "z-ai/glm-4.6",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "z-ai/glm-4.7",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "z-ai/glm-4.7-flashx",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "z-ai/glm-5",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "z-ai/glm-5-turbo",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "z-ai/glm-5.1",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "z-ai/glm-5.2",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "z-ai/glm-5.3",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "z-ai/glm-5.3-flash",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        },
+        {
+          "name": "z-ai/glm-5v-turbo",
+          "free": true,
+          "isFree": true,
+          "freeLimit": "Ofox free tier",
+          "updatedAt": "2025-01-15",
+          "pricing": {
+            "prompt": 0,
+            "completion": 0,
+            "currency": "USD"
+          }
+        }
+      ]
     }
   ]
 }
