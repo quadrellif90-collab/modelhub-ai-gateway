@@ -4,6 +4,7 @@ dist/
 *.log.jsonl
 logs/
 auth.json
+prefs.json
 prefs.local.json
 modelhub-export-*.json
 .DS_Store
