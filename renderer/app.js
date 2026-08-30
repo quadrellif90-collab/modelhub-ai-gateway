@@ -224,16 +224,13 @@ function bindToolbar() {
   const search = document.getElementById("pSearch");
   const filter = document.getElementById("pFilter");
   const sort = document.getElementById("pSort");
-  const compact = document.getElementById("pCompact");
   search.value = UI.search;
   filter.value = UI.filter;
   sort.value = UI.sort;
-  compact.checked = !!UI.compact;
   let t = null;
   search.oninput = () => { clearTimeout(t); t = setTimeout(() => { UI.search = search.value; saveUI(); if (STATE) renderProvidersWithMeta(STATE); }, 250); };
   filter.onchange = () => { UI.filter = filter.value; saveUI(); if (STATE) renderProvidersWithMeta(STATE); };
   sort.onchange = () => { UI.sort = sort.value; saveUI(); if (STATE) renderProvidersWithMeta(STATE); };
-  compact.onchange = () => { UI.compact = compact.checked; saveUI(); if (STATE) renderProvidersWithMeta(STATE); };
 }
 bindToolbar();
 
