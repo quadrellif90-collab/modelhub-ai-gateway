@@ -858,5 +858,17 @@ function renderProvidersWithMeta(state) {
 }
 if (typeof window.renderProviders === "function") window.renderProviders = renderProvidersWithMeta;
 
+// theme toggle (dark/light), persisted
+(function () {
+  const btn = document.getElementById("themeBtn");
+  function apply(t) {
+    document.body.classList.toggle("light", t === "light");
+    try { localStorage.setItem("mh-theme", t); } catch {}
+  }
+  btn.onclick = () => apply(document.body.classList.contains("light") ? "dark" : "light");
+  let saved = "dark";
+  try { saved = localStorage.getItem("mh-theme") || "dark"; } catch {}
+  apply(saved);
+})();
 
 setInterval(poll, 3000);
