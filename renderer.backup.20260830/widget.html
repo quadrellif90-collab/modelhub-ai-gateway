@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Segoe UI", system-ui, sans-serif;
+      font-size: 12px; color: #e6e6e6;
+      background: #14161b; border: 1px solid #2a2e37; border-radius: 10px;
+      overflow: hidden; height: 100vh; display: flex; flex-direction: column;
+    }
+    header {
+      -webkit-app-region: drag; display: flex; align-items: center;
+      padding: 8px 10px; background: #1b1f27; cursor: move; user-select: none;
+    }
+    header .t { font-weight: 600; flex: 1; }
+    header .dot { width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+    .on { background: #3fb96a; } .off { background: #d05050; }
+    header button {
+      -webkit-app-region: no-drag; background: none; border: none; color: #888;
+      font-size: 13px; cursor: pointer; margin-left: 6px;
+    }
+    main { flex: 1; overflow-y: auto; padding: 8px 10px; }
+    .sec { margin-bottom: 8px; }
+    .lbl { color: #7d8590; text-transform: uppercase; font-size: 10px; letter-spacing: .5px; }
+    .val { font-size: 13px; }
+    .mono { font-family: Consolas, monospace; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; }
+    table { width: 100%; border-collapse: collapse; }
+    td { padding: 2px 4px; border-top: 1px solid #23272f; white-space: nowrap; }
+    td.mono { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+    .ok { color: #3fb96a; } .bad { color: #d05050; } .dim { color: #7d8590; }
+    .free { color: #58a6ff; }
+    footer { padding: 5px 10px; background: #1b1f27; color: #7d8590; font-size: 10px; }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="dot off" id="dot"></span><span class="t">ModelHub</span>
+    <button onclick="window.close()" title="chiudi">✕</button>
+  </header>
+  <main>
+    <div class="sec grid">
+      <div><div class="lbl">In uso ora</div><div class="val mono" id="inUse">–</div></div>
+      <div><div class="lbl">Profilo richiesto</div><div class="val mono" id="prof">–</div></div>
+      <div><div class="lbl">Richieste oggi</div><div class="val" id="req">–</div></div>
+      <div><div class="lbl">Token oggi</div><div class="val" id="tok">–</div></div>
+      <div><div class="lbl">Costo oggi</div><div class="val" id="cost">–</div></div>
+      <div><div class="lbl">Modelli sani</div><div class="val" id="healthy">–</div></div>
+    </div>
+    <div class="sec">
+      <div class="lbl">Ultime richieste</div>
+      <table><tbody id="rows"><tr><td class="dim">nessuna richiesta</td></tr></tbody></table>
+    </div>
+  </main>
+  <footer id="enh">enhancer: –</footer>
+  <script>
+    const BASE = "http://127.0.0.1:8787";
+    const TOKEN = new URLSearchParams(location.search).get("t") || "";
+    async function api(p) {
+      const r = await fetch(BASE + p, { headers: { "x-modelhub-token": TOKEN } });
+      try { return await r.json(); } catch { return null; }
+    }
+    function fmtCost(c) {
+      if (!c || c === 0) return "$0";
+      if (c < 0.01) return "$" + c.toFixed(4);
+      return "$" + c.toFixed(2);
+    }
+    async function tick() {
+      let s, l;
+      try { [s, l] = await Promise.all([api("/hub/state"), api("/hub/logs")]); }
+      catch { setOff(); return; }
+      if (!s || !s.port) { setOff(); return; }
+      document.getElementById("dot").className = "dot on";
+      document.getElementById("healthy").textContent = `${s.totals.healthy} / ${s.models.length}`;
+      document.getElementById("req").textContent = s.totals.req;
+      document.getElementById("tok").textContent = (s.totals.tok / 1000).toFixed(1) + "k";
+      document.getElementById("cost").textContent = fmtCost(s.totals.cost);
+      document.getElementById("enh").textContent = s.enhancer && s.enhancer.enabled && s.enhancer.model
+        ? `enhancer: ON · ${s.enhancer.model}`
+        : "enhancer: OFF";
+      const logs = (l && l.logs) || [];
+      const lastOk = logs.find(x => x.ok && !x.cached && x.model && x.proto !== "enhance");
+      if (lastOk) {
+        document.getElementById("inUse").textContent = lastOk.model;
+        document.getElementById("prof").textContent = lastOk.reqModel || "(auto)";
+      }
+      const rows = document.getElementById("rows");
+      rows.innerHTML = logs.slice(0, 7).map(x => {
+        const t = new Date(x.ts).toLocaleTimeString();
+        const st = x.ok ? `<span class="ok">ok${x.cached ? " ⚡" : ""}</span>` : `<span class="bad" title="${String(x.error || "").replace(/"/g, "")}">err</span>`;
+        const lat = x.ttftMs != null ? x.ttftMs + "ms" : (x.latencyMs ? x.latencyMs + "ms" : "");
+        return `<tr><td class="dim">${t}</td><td class="mono" title="${x.proto || ""}">${x.proto || ""}</td>` +
+          `<td class="mono" title="${(x.model || x.error || "").toString().replace(/"/g, "")}">${x.model || "—"}</td>` +
+          `<td>${lat}</td><td>${st}</td></tr>`;
+      }).join("");
+    }
+    function setOff() {
+      document.getElementById("dot").className = "dot off";
+    }
+    tick();
+    setInterval(tick, 1500);
+  </script>
+</body>
+</html>

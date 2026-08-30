@@ -11,14 +11,14 @@
 <body>
   <header class="topbar">
     <div class="brand">ModelHub <span class="sub">aggregatore locale multi-provider</span></div>
-    <div id="costBadge" class="badge cost" title="Spesa di oggi / totale">–</div>
-    <div id="lastModel" class="badge lastmodel" title="Ultimo modello risolto">–</div>
+      <div id="costBadge" class="badge cost" title="Spesa di oggi / totale">–</div>
+      <div id="lastModel" class="badge lastmodel" title="Ultimo modello risolto">–</div>
     <div class="status">
       <span id="serverDot" class="dot off"></span>
       <span id="serverText">server…</span>
     </div>
     <div class="actions">
-      <button id="drawerToggle" class="btn" title="Mostra/Nascondi pannello laterale">☰ Pannello</button>
+      <button id="sidebarToggle" class="btn" title="Mostra/Nascondi pannello laterale">☰ Pannello</button>
       <button id="settingsBtn" class="btn" title="Apri impostazioni">Impostazioni</button>
       <button id="exportBtn" class="btn" title="Esporta config completa (incluse API keys)">Export</button>
       <button id="widgetBtn" class="btn" title="Apri/chiudi il widget realtime in tray">Widget</button>
@@ -29,77 +29,53 @@
   </header>
 
   <main class="layout">
-    <!-- Widget realtime: in alto, tutto largo -->
-    <section class="panel widget-bar" id="widgetBar">
-      <div class="wb-head">
+    <section class="col main">
+      <!-- Widget realtime: in alto, tutto largo -->
+      <section class="panel widget-bar" id="widgetBar">
         <h2>Widget realtime</h2>
-        <span class="wb-hint">monitora richieste e modelli in uso</span>
-      </div>
-      <iframe id="widgetFrame" src="widget.html" title="Widget realtime" loading="lazy"></iframe>
+        <iframe id="widgetFrame" src="widget.html" title="Widget realtime" loading="lazy"></iframe>
+      </section>
+
+      <section class="panel providers-panel">
+        <h2>Provider &amp; modelli <span id="modelCount" class="count"></span></h2>
+        <div class="ptoolbar">
+          <input id="pSearch" type="search" placeholder="cerca provider o modello…" />
+          <select id="pFilter" title="Filtro modelli">
+            <option value="all">tutti i modelli</option>
+            <option value="enabled">solo attivi</option>
+            <option value="disabled">solo disattivi</option>
+            <option value="free">solo free</option>
+          </select>
+          <select id="pSort" title="Ordinamento">
+            <option value="default">ordine default</option>
+            <option value="name">nome A→Z</option>
+            <option value="health">salute prima</option>
+            <option value="usage">più usati</option>
+          </select>
+          <label class="check compact"><input id="pCompact" type="checkbox" /> compatta</label>
+        </div>
+        <div id="providers"></div>
+      </section>
+
+      <section class="activity">
+        <div class="panel wide">
+          <h2>Classifica autoroute <span class="count">top 30 · punteggio dinamico</span></h2>
+          <ol id="leaderboard" class="lb"></ol>
+        </div>
+        <div class="panel wide">
+          <h2>Richieste recenti</h2>
+          <div id="chart24" class="chart"></div>
+          <table class="logs">
+            <thead>
+              <tr><th>ora</th><th>modello richiesto</th><th>usato</th><th>proto</th><th>ms</th><th>ttft</th><th>tok</th><th>$</th><th></th></tr>
+            </thead>
+            <tbody id="logRows"><tr><td colspan="9" class="hint">nessuna richiesta</td></tr></tbody>
+          </table>
+        </div>
+      </section>
     </section>
 
-    <div class="grid-main">
-      <section class="col main-col">
-        <section class="panel providers-panel">
-          <h2>Provider &amp; modelli <span id="modelCount" class="count"></span></h2>
-          <div class="ptoolbar">
-            <input id="pSearch" type="search" placeholder="cerca provider o modello…" />
-            <select id="pFilter" title="Filtro modelli">
-              <option value="all">tutti i modelli</option>
-              <option value="enabled">solo attivi</option>
-              <option value="disabled">solo disattivi</option>
-              <option value="free">solo free</option>
-            </select>
-            <select id="pSort" title="Ordinamento">
-              <option value="default">ordine default</option>
-              <option value="name">nome A→Z</option>
-              <option value="health">salute prima</option>
-              <option value="usage">più usati</option>
-            </select>
-            <label class="check compact"><input id="pCompact" type="checkbox" /> compatta</label>
-          </div>
-          <div id="providers"></div>
-        </section>
-      </section>
-
-      <section class="col activity-col">
-        <section class="panel wide">
-          <div class="tabs">
-            <button class="tab active" data-tab="leader">Classifica autoroute</button>
-            <button class="tab" data-tab="recent">Richieste recenti</button>
-            <button class="tab" data-tab="stats">Statistiche</button>
-          </div>
-          <div class="tab-body" id="tab-leader">
-            <h2 class="tab-title">Classifica autoroute <span class="count">top 30 · punteggio dinamico</span></h2>
-            <ol id="leaderboard" class="lb"></ol>
-          </div>
-          <div class="tab-body hidden" id="tab-recent">
-            <h2 class="tab-title">Richieste recenti</h2>
-            <div id="chart24" class="chart"></div>
-            <table class="logs">
-              <thead>
-                <tr><th>ora</th><th>modello richiesto</th><th>usato</th><th>proto</th><th>ms</th><th>ttft</th><th>tok</th><th>$</th><th></th></tr>
-              </thead>
-              <tbody id="logRows"><tr><td colspan="9" class="hint">nessuna richiesta</td></tr></tbody>
-            </table>
-          </div>
-          <div class="tab-body hidden" id="tab-stats">
-            <h2 class="tab-title">Statistiche</h2>
-            <div id="statsGrid" class="stats-grid"></div>
-          </div>
-        </section>
-      </section>
-    </div>
-  </main>
-
-  <!-- Drawer laterale (slide-in) -->
-  <div class="drawer-overlay" id="drawerOverlay"></div>
-  <aside class="drawer" id="drawer">
-    <div class="drawer-head">
-      <h2>Pannello</h2>
-      <button id="drawerClose" class="btn icon" title="Chiudi">✕</button>
-    </div>
-    <div class="drawer-body">
+    <aside class="col side hidden" id="sidebar">
       <section class="panel">
         <h2>Profili & ordinamento</h2>
                 <div class="row">
@@ -182,6 +158,18 @@
       </section>
 
       <section class="panel">
+        <h2>Impostazioni</h2>
+        <div class="row"><label class="check">verifica profili ogni <input id="setVerifyMin" type="number" min="1" max="1440" style="width:55px" /> min</label></div>
+        <div class="row"><label class="check">modelli per verifica (top K) <input id="setTopK" type="number" min="3" max="50" style="width:45px" /></label></div>
+        <div class="row"><label class="check">budget failover <input id="setFailoverSec" type="number" min="5" max="600" style="width:55px" /> s</label></div>
+        <div class="row"><label class="check">cache TTL <input id="setCacheMin" type="number" min="1" max="1440" style="width:55px" /> min</label></div>
+        <button id="settingsSave" class="btn primary">Salva impostazioni</button>
+        <p class="hint" id="setInfo"></p>
+        <button id="tokenRegen" class="btn danger" title="Genera un nuovo token di controllo per /hub/*">Rigenera token controllo</button>
+        <p class="hint">Porta (<span id="setPort"></span>) e concorrenza richiedono il riavvio dell'app.</p>
+      </section>
+
+      <section class="panel">
         <h2>Configurazione avanzata</h2>
         <h3>Quote per chiave gateway</h3>
         <div class="row"><label class="check">chiave <select id="klKey"></select></label></div>
@@ -206,6 +194,38 @@
       </section>
 
       <section class="panel">
+        <h2>Funzionalità</h2>
+        <label class="check"><input id="featEnhancer" type="checkbox" /> prompt enhancer</label>
+        <label class="check"><input id="featCache" type="checkbox" /> cache risposte</label>
+        <label class="check"><input id="featProbe" type="checkbox" /> probe automatico</label>
+        <div id="cacheInfo" class="hint">–</div>
+        <button id="cacheClear" class="btn">Svuota cache</button>
+      </section>
+
+      <section class="panel">
+        <h2>Filtri modelli</h2>
+        <p class="hint">Escludi modelli a pagamento, mostra solo free, auto-escludi non-free, blacklist manuale. Smart fallback passa a un modello libero su 429.</p>
+        <label class="check"><input id="mfExcludePaid" type="checkbox" /> escludi modelli a pagamento</label>
+        <label class="check"><input id="mfFreeOnly" type="checkbox" /> solo provider free (nascondi paid)</label>
+        <label class="check"><input id="mfAutoExclude" type="checkbox" /> auto-escludi modelli non-free</label>
+        <label class="check"><input id="mfSmartFallback" type="checkbox" /> smart fallback (429 → modello libero simile)</label>
+        <div class="row">
+          <button id="mfSave" class="btn primary">Salva filtri</button>
+          <span id="mfMsg" class="msg"></span>
+        </div>
+        <h3>Esclusione manuale (blacklist)</h3>
+        <p class="hint">Aggiungi <code>provider:modello</code> per nasconderlo sempre. Le voci nella tabella sotto hanno il pulsante "Escludi".</p>
+        <div class="row">
+          <input id="mfBlackAdd" placeholder="provider:modello" style="width:55%" />
+          <button id="mfBlackAddBtn" class="btn">+ Aggiungi</button>
+        </div>
+        <div id="mfBlackList" class="gwlist"></div>
+        <div class="row">
+          <button id="mfBlackClear" class="btn danger">Ripristina tutti</button>
+        </div>
+      </section>
+
+      <section class="panel">
         <h2>Aggiungi provider</h2>
         <div class="form">
           <input id="np_name" placeholder="nome (es. openai)" />
@@ -218,19 +238,17 @@
           <div id="scanOut" class="hint"></div>
         </div>
       </section>
-    </div>
-  </aside>
+    </aside>
 
-  <div id="toast" class="toast"></div>
-
-  <script>
-    // Passa il token di controllo all'iframe del widget così può fare fetch autenticati
-    (function () {
-      const t = new URLSearchParams(location.search).get("t") || "";
-      const f = document.getElementById("widgetFrame");
-      if (f && t) f.src = "widget.html?t=" + encodeURIComponent(t);
-    })();
-  </script>
+    <script>
+      // Passa il token di controllo all'iframe del widget così può fare fetch autenticati
+      (function () {
+        const t = new URLSearchParams(location.search).get("t") || "";
+        const f = document.getElementById("widgetFrame");
+        if (f && t) f.src = "widget.html?t=" + encodeURIComponent(t);
+      })();
+    </script>
+  </main>
 
   <script src="app.js"></script>
 </body>

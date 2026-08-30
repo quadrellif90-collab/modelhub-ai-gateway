@@ -35,6 +35,7 @@ async function poll() {
     document.getElementById("serverText").textContent = up ? `server attivo :${s.port}` : "server offline";
     if (s) {
       render(s);
+      renderModelFilter(s);
       renderLogs(l.logs || []);
       updateLastModel(l.logs || []);
     }
@@ -67,15 +68,18 @@ function render(s) {
   const cb = document.getElementById("costBadge");
   cb.textContent = `oggi: ${fmtCost(s.totals.cost)} · ${s.totals.req} req · ${(s.totals.tok / 1000).toFixed(1)}k tok`;
   cb.title = `Totale storico: ${fmtCost(s.totals.lifetimeCost)} · cache hits: ${s.cache.hits}`;
-  renderProvidersWithMeta(s);
+  renderProviders(s);
   renderProfiles(s);
   renderPricing(s);
   renderGatewayKeys(s);
   renderEnhancer(s);
+  renderFeatures(s);
   renderSettings(s);
   renderLeaderboard(s);
-  renderStats(s);
-  renderLogs((STATE && STATE.logs) || (s.logs) || []);
+  const ci = document.getElementById("cacheInfo");
+  ci.textContent = s.cache.enabled
+    ? `${s.cache.size} voci in cache · ${s.cache.hits} hit · TTL ${Math.round(s.cache.ttlMs / 1000)}s`
+    : "cache disabilitata (MODELHUB_CACHE=0)";
 }
 
 function renderProviders(s) {
@@ -128,7 +132,7 @@ function renderProviders(s) {
       if (e.target.closest("button")) return;
       UI.collapsed[p.name] = !UI.collapsed[p.name];
       saveUI();
-      renderProvidersWithMeta(STATE);
+      renderProviders(STATE);
     };
     card.appendChild(head);
 
@@ -230,10 +234,10 @@ function bindToolbar() {
   sort.value = UI.sort;
   compact.checked = !!UI.compact;
   let t = null;
-  search.oninput = () => { clearTimeout(t); t = setTimeout(() => { UI.search = search.value; saveUI(); if (STATE) renderProvidersWithMeta(STATE); }, 250); };
-  filter.onchange = () => { UI.filter = filter.value; saveUI(); if (STATE) renderProvidersWithMeta(STATE); };
-  sort.onchange = () => { UI.sort = sort.value; saveUI(); if (STATE) renderProvidersWithMeta(STATE); };
-  compact.onchange = () => { UI.compact = compact.checked; saveUI(); if (STATE) renderProvidersWithMeta(STATE); };
+  search.oninput = () => { clearTimeout(t); t = setTimeout(() => { UI.search = search.value; saveUI(); if (STATE) renderProviders(STATE); }, 250); };
+  filter.onchange = () => { UI.filter = filter.value; saveUI(); if (STATE) renderProviders(STATE); };
+  sort.onchange = () => { UI.sort = sort.value; saveUI(); if (STATE) renderProviders(STATE); };
+  compact.onchange = () => { UI.compact = compact.checked; saveUI(); if (STATE) renderProviders(STATE); };
 }
 bindToolbar();
 
@@ -376,6 +380,13 @@ function renderEnhancer(s) {
 
 function renderSettings(s) {
   const st = s.settings || {};
+  document.getElementById("setVerifyMin").value = Math.round((st.verifyMs || 900000) / 60000);
+  document.getElementById("setTopK").value = st.verifyTopK || 6;
+  document.getElementById("setFailoverSec").value = Math.round((st.failoverMs || 45000) / 1000);
+  document.getElementById("setCacheMin").value = Math.round((st.cacheTtlMs || 600000) / 60000);
+  document.getElementById("setPort").textContent = st.port || "";
+  document.getElementById("setAddr").textContent = BASE;
+  document.getElementById("setInfo").textContent = `concorrenza provider: ${st.provConcurrency ?? "–"} · cap stream: ${st.streamCapPerProvider ?? "–"} · token controllo: ${st.tokenSet ? "attivo" : "ASSENTE"}`;
   const exp = s.experiments || {};
   document.getElementById("expOn").checked = !!exp.enabled;
   document.getElementById("expProfile").value = exp.candidate || "";
@@ -408,6 +419,14 @@ function renderSettings(s) {
   }).catch(() => {});
 }
 
+function renderFeatures(s) {
+  const f = s.features || {};
+  const enh = s.enhancer || {};
+  document.getElementById("featEnhancer").checked = !!(enh && enh.enabled);
+  document.getElementById("featCache").checked = !!f.cache;
+  document.getElementById("featProbe").checked = !!f.autoProbe;
+}
+
 function renderLeaderboard(s) {
   const ol = document.getElementById("leaderboard");
   if (!ol) return;
@@ -430,32 +449,6 @@ function classifyLabel(id) {
   if (/reason|r1|reasoner|thinking|\bo[13]\b|-o1-|qwq|nemotron-3-ultra/i.test(id)) return "reasoning";
   if (/8b|flash-lite|mini|turbo|small|lightning|nano|instant|1\.5-flash|qwen-turbo|solar-mini|gemma2|ministral|llama3\.1-8b/i.test(id)) return "fast";
   return "general";
-}
-
-function toast(msg, isErr) {
-  const el = document.getElementById("toast");
-  if (!el) return;
-  el.textContent = msg;
-  el.className = "toast show" + (isErr ? " err" : "");
-  clearTimeout(toast._t);
-  toast._t = setTimeout(() => { el.className = "toast"; }, 2600);
-}
-
-function renderStats(s) {
-  const grid = document.getElementById("statsGrid");
-  if (!grid) return;
-  const t = s.totals || {};
-  const cards = [
-    { v: (s.models || []).length, l: "Modelli totali" },
-    { v: (s.providers || []).length, l: "Provider" },
-    { v: t.healthy != null ? t.healthy : "–", l: "Modelli sani" },
-    { v: t.req != null ? t.req : "–", l: "Richieste oggi" },
-    { v: t.tok != null ? (t.tok / 1000).toFixed(1) + "k" : "–", l: "Token oggi" },
-    { v: t.cost != null ? (t.cost < 0.01 ? "$" + t.cost.toFixed(4) : "$" + t.cost.toFixed(2)) : "–", l: "Costo oggi" },
-    { v: (s.profiles || []).length, l: "Profili" },
-    { v: (s.enhancer && s.enhancer.enabled) ? "ON" : "OFF", l: "Enhancer" },
-  ];
-  grid.innerHTML = cards.map(c => `<div class="stat-card"><div class="v">${c.v}</div><div class="l">${c.l}</div></div>`).join("");
 }
 
 function renderLogs(logs) {
@@ -533,41 +526,27 @@ document.getElementById("settingsBtn").onclick = () => {
   // instradato dal main.js (setWindowOpenHandler -> createSettingsWindow)
   window.open("modelhub://settings");
 };
-// Drawer laterale (slide-in) — sostituisce la vecchia sidebar
+// Toggle sidebar laterale (nascosta di default)
 (function () {
-  const drawer = document.getElementById("drawer");
-  const overlay = document.getElementById("drawerOverlay");
-  const btn = document.getElementById("drawerToggle");
-  const close = document.getElementById("drawerClose");
-  const KEY = "mh-drawer";
+  const layout = document.querySelector(".layout");
+  const side = document.getElementById("sidebar");
+  const btn = document.getElementById("sidebarToggle");
+  const KEY = "mh-sidebar";
   function apply(on) {
-    drawer.classList.toggle("open", on);
-    overlay.classList.toggle("open", on);
+    if (on) { layout.classList.add("with-side"); side.classList.remove("hidden"); }
+    else { layout.classList.remove("with-side"); side.classList.add("hidden"); }
     try { localStorage.setItem(KEY, on ? "1" : "0"); } catch {}
   }
   let on = false;
-  try { on = localStorage.getItem(KEY) === "1"; } catch {}
+  try { on = localStorage.getItem(KEY) !== "0"; } catch {}
   apply(on);
-  btn.onclick = () => apply(!drawer.classList.contains("open"));
-  close.onclick = () => apply(false);
-  overlay.onclick = () => apply(false);
-})();
-// Tabs attività (leader / recent / stats)
-(function () {
-  const tabs = document.querySelectorAll(".tab");
-  tabs.forEach(t => t.onclick = () => {
-    tabs.forEach(x => x.classList.remove("active"));
-    t.classList.add("active");
-    document.querySelectorAll(".tab-body").forEach(b => b.classList.add("hidden"));
-    document.getElementById("tab-" + t.dataset.tab).classList.remove("hidden");
-  });
+  btn.onclick = () => apply(!layout.classList.contains("with-side"));
 })();
 document.getElementById("strategySelect").onchange = async (e) => {
   await api("/hub/strategy", "POST", { profile: selectedProfile, strategy: e.target.value });
 };
 document.getElementById("saveOrder").onclick = async () => {
   await api("/hub/reorder", "POST", { profile: selectedProfile, order: profileOrder });
-  toast("Ordine profilo salvato ✓");
   poll();
 };
 document.getElementById("profileNew").onclick = async () => {
@@ -625,9 +604,8 @@ document.getElementById("bulkImport").onclick = async () => {
   try {
     const r = await api("/hub/keys", "POST", obj);
     msg.textContent = "Importate " + (r.count || Object.keys(obj).length) + " chiavi."; msg.className = "msg ok";
-    toast("Importate " + (r.count || Object.keys(obj).length) + " chiavi ✓");
     poll();
-  } catch (e) { msg.textContent = "Errore: " + e.message; msg.className = "msg err"; toast("Errore import: " + e.message, true); }
+  } catch (e) { msg.textContent = "Errore: " + e.message; msg.className = "msg err"; }
 };
 document.getElementById("gwMint").onclick = async () => {
   const label = document.getElementById("gwLabel").value.trim();
@@ -662,6 +640,22 @@ document.getElementById("semClear").onclick = async () => {
   await api("/hub/semcache", "POST", { action: "clear" });
   poll();
 };
+document.getElementById("cacheClear").onclick = async () => {
+  await api("/hub/cache", "POST", { clear: true });
+  poll();
+};
+document.getElementById("featEnhancer").onchange = async (e) => {
+  await api("/hub/enhancer", "POST", { enabled: e.target.checked });
+  poll();
+};
+document.getElementById("featCache").onchange = async (e) => {
+  await api("/hub/features", "POST", { cache: e.target.checked });
+  poll();
+};
+document.getElementById("featProbe").onchange = async (e) => {
+  await api("/hub/features", "POST", { autoProbe: e.target.checked });
+  poll();
+};
 document.getElementById("exportBtn").onclick = async () => {
   const r = await fetch(BASE + "/hub/export", { headers: { "x-modelhub-token": TOKEN } });
   const blob = await r.blob();
@@ -690,6 +684,23 @@ document.getElementById("enhMaxChars").onchange = async (e) => {
 document.getElementById("enhTimeout").onchange = async (e) => {
   const v = Number(e.target.value);
   if (Number.isFinite(v) && v >= 3) { await api("/hub/enhancer", "POST", { timeoutMs: v * 1000 }); poll(); }
+};
+document.getElementById("settingsSave").onclick = async () => {
+  const g = id => Number(document.getElementById(id).value);
+  if (!(g("setVerifyMin") > 0) || !(g("setTopK") >= 3) || !(g("setFailoverSec") >= 5) || !(g("setCacheMin") > 0)) { alert("valori non validi"); return; }
+  await api("/hub/settings", "POST", {
+    verifyMs: g("setVerifyMin") * 60000,
+    verifyTopK: g("setTopK"),
+    failoverMs: g("setFailoverSec") * 1000,
+    cacheTtlMs: g("setCacheMin") * 60000
+  });
+  poll();
+};
+document.getElementById("tokenRegen").onclick = async () => {
+  if (!confirm("Generare un nuovo token di controllo? Le finestre dell'app dovranno essere riavviate.")) return;
+  const r = await api("/hub/settings", "POST", { regenerateToken: true });
+  if (r && r.regeneratedToken) alert("Nuovo token di controllo:\n\n" + r.regeneratedToken + "\n\nConservalo ora: non verrà più mostrato.");
+  poll();
 };
 document.getElementById("klSave").onclick = async () => {
   const kid = document.getElementById("klKey").value;
@@ -787,17 +798,65 @@ function flash(msg) {
   flashTimer = setTimeout(() => { el.style.opacity = "0"; }, 1800);
 }
 
+
+// --- Filtri modelli ---
+function renderModelFilter(state) {
+  const mf = (state && state.modelFilter) || {};
+  document.getElementById("mfExcludePaid").checked = !!mf.excludePaid;
+  document.getElementById("mfFreeOnly").checked = !!mf.freeProvidersOnly;
+  document.getElementById("mfAutoExclude").checked = !!mf.autoExcludeNonFree;
+  const smart = !!(state && state.features && state.features.smartFallback);
+  document.getElementById("mfSmartFallback").checked = smart;
+  renderBlacklist(mf.blacklist || []);
+}
+function renderBlacklist(list) {
+  const el = document.getElementById("mfBlackList");
+  if (!el) return;
+  if (!list.length) { el.innerHTML = '<p class="hint">nessuna esclusione</p>'; return; }
+  el.innerHTML = list.map(id =>
+    `<div class="gwitem"><span class="gwsub">${esc(id)}</span><button class="btn danger gw-del" data-id="${esc(id)}">Rimuovi</button></div>`
+  ).join("");
+  el.querySelectorAll(".gw-del").forEach(b => {
+    b.onclick = async () => {
+      await api("/hub/model-filter/blacklist", "POST", { action: "remove", id: b.dataset.id });
+      poll();
+    };
+  });
+}
+document.getElementById("mfSave").onclick = async () => {
+  const body = {
+    excludePaid: document.getElementById("mfExcludePaid").checked,
+    freeProvidersOnly: document.getElementById("mfFreeOnly").checked,
+    autoExcludeNonFree: document.getElementById("mfAutoExclude").checked,
+    smartFallback: document.getElementById("mfSmartFallback").checked
+  };
+  const r = await api("/hub/model-filter", "POST", body);
+  document.getElementById("mfMsg").textContent = r.ok ? "salvato ✓" : ("errore: " + (r.error || ""));
+  poll();
+};
+document.getElementById("mfBlackAddBtn").onclick = async () => {
+  const v = document.getElementById("mfBlackAdd").value.trim();
+  if (!v) return;
+  const r = await api("/hub/model-filter/blacklist", "POST", { action: "add", id: v });
+  if (r.ok) document.getElementById("mfBlackAdd").value = "";
+  poll();
+};
+document.getElementById("mfBlackClear").onclick = async () => {
+  await api("/hub/model-filter/blacklist", "POST", { action: "clear" });
+  poll();
+};
+
 // estende il rendering dei modelli con badge free / metadati / pulsante escludi
-const _origRenderProviders = renderProviders;
+const _origRenderProviders = window.renderProviders;
 function renderProvidersWithMeta(state) {
   if (typeof _origRenderProviders === "function") _origRenderProviders(state);
   const blacklist = (state && state.modelFilter && state.modelFilter.blacklist) || [];
-  document.querySelectorAll(".model").forEach(row => {
+  document.querySelectorAll(".model-row").forEach(row => {
     const id = row.dataset.id;
     if (!id) return;
     const m = (state.models || []).find(x => x.id === id);
     if (!m) return;
-    const nameEl = row.querySelector(".mname");
+    const nameEl = row.querySelector(".model-name");
     if (!nameEl) return;
     let badge = row.querySelector(".mf-badge");
     if (!badge) {

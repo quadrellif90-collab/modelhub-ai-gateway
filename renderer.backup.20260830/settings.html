@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+  <title>ModelHub — Impostazioni</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: "Segoe UI", system-ui, sans-serif; font-size: 13px; color: #d7dce5; background: #0f1115; padding: 16px 18px; }
+    h1 { font-size: 16px; margin-bottom: 4px; }
+    .sub { color: #8b94a3; font-size: 11px; margin-bottom: 14px; }
+    .card { background: #171a21; border: 1px solid #2a2f3a; border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
+    .card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: #8b94a3; margin-bottom: 10px; }
+    .row { display: flex; align-items: center; justify-content: space-between; padding: 7px 0; border-top: 1px solid #20242c; }
+    .row:first-of-type { border-top: none; }
+    .row .lbl { flex: 1; }
+    .row .lbl small { display: block; color: #8b94a3; font-size: 11px; margin-top: 2px; }
+    .check { width: 18px; height: 18px; cursor: pointer; }
+    select, input[type=number] { background: #1e222b; color: #d7dce5; border: 1px solid #2a2f3a; border-radius: 6px; padding: 5px 8px; font-size: 13px; }
+    input[type=number] { width: 90px; }
+    .btn { background: #4f9dff; color: #0f1115; border: none; border-radius: 6px; padding: 8px 14px; font-weight: 600; cursor: pointer; margin-top: 6px; }
+    .btn:hover { filter: brightness(1.1); }
+    .btn.sec { background: #2a2f3a; color: #d7dce5; }
+    .ok { color: #3fd07a; } .bad { color: #ff5d5d; }
+    .hint { color: #8b94a3; font-size: 11px; margin-top: 6px; }
+    footer { text-align: right; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <h1>Impostazioni ModelHub</h1>
+  <div class="sub">Finestra popup — le modifiche si applicano subito e persistono.</div>
+
+  <div class="card">
+    <h2>Avvio</h2>
+    <div class="row">
+      <div class="lbl">Avvio automatico a login<small>ModelHub parte con Windows</small></div>
+      <input type="checkbox" id="autoStart" class="check" />
+    </div>
+    <div class="row">
+      <div class="lbl">Avvia minimizzato in tray<small>Non mostra la finestra all'avvio</small></div>
+      <input type="checkbox" id="startMin" class="check" />
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Comportamento</h2>
+    <div class="row">
+      <div class="lbl">Cache risposte<small>Memorizza risposte identiche</small></div>
+      <input type="checkbox" id="featCache" class="check" />
+    </div>
+    <div class="row">
+      <div class="lbl">Auto-probe all'avvio<small>Verifica i modelli all'avvio (più lento)</small></div>
+      <input type="checkbox" id="featProbe" class="check" />
+    </div>
+    <div class="row">
+      <div class="lbl">Smart fallback su 429<small>Passa a un modello libero al limite rate</small></div>
+      <input type="checkbox" id="featFallback" class="check" />
+    </div>
+    <div class="row">
+      <div class="lbl">Tema chiaro<small>Altrimenti tema scuro</small></div>
+      <input type="checkbox" id="themeLight" class="check" />
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Filtri modelli</h2>
+    <div class="row">
+      <div class="lbl">Escludi modelli pagati<small>Nasconde i modelli a pagamento</small></div>
+      <input type="checkbox" id="mfExcludePaid" class="check" />
+    </div>
+    <div class="row">
+      <div class="lbl">Solo provider free<small>Mostra solo provider con free tier</small></div>
+      <input type="checkbox" id="mfFreeOnly" class="check" />
+    </div>
+    <div class="row">
+      <div class="lbl">Auto-escludi non-free<small>Esclude automaticamente i modelli non free</small></div>
+      <input type="checkbox" id="mfAutoExclude" class="check" />
+    </div>
+    <div class="row">
+      <div class="lbl">Limite richieste/giorno<small>0 = illimitato</small></div>
+      <input type="number" id="dailyLimit" min="0" step="100" value="0" />
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Rete</h2>
+    <div class="row">
+      <div class="lbl">Porta server<small>Solo riavvio app</small></div>
+      <input type="number" id="port" min="1024" max="65535" value="8787" />
+    </div>
+  </div>
+
+  <footer>
+    <button class="btn sec" id="openPanel">Apri pannello</button>
+    <button class="btn" id="save">Salva</button>
+  </footer>
+  <div class="hint" id="status"></div>
+
+  <script>
+    const TOKEN = new URLSearchParams(location.search).get("t") || "";
+    const BASE = "http://127.0.0.1:8787";
+    async function api(p, m, b) {
+      const r = await fetch(BASE + p, { method: m || "GET", headers: { "content-type": "application/json", "x-modelhub-token": TOKEN }, body: b ? JSON.stringify(b) : undefined });
+      try { return await r.json(); } catch { return null; }
+    }
+    const $ = (id) => document.getElementById(id);
+    const set = (id, v) => { $(id).checked = !!v; };
+
+    async function load() {
+      const s = await api("/hub/state");
+      if (!s) { $("status").textContent = "server non raggiungibile"; return; }
+      const f = s.features || {};
+      const mf = s.modelFilter || {};
+      // avvio automatico (da main, non dallo state: lo chiediamo a parte)
+      set("featCache", f.cache);
+      set("featProbe", f.autoProbe);
+      set("featFallback", f.smartFallback);
+      set("mfExcludePaid", mf.excludePaid);
+      set("mfFreeOnly", mf.freeProvidersOnly);
+      set("mfAutoExclude", mf.autoExcludeNonFree);
+      $("dailyLimit").value = (mf.dailyLimit || 0);
+      $("port").value = (s.port || 8787);
+      // tema
+      try { set("themeLight", localStorage.getItem("mh-theme") === "light"); } catch {}
+      // startMinimized
+      try { set("startMin", !!(s.features && s.features.startMinimized)); } catch {}
+    }
+
+    async function save() {
+      const f = {
+        cache: $("featCache").checked,
+        autoProbe: $("featProbe").checked,
+        smartFallback: $("featFallback").checked,
+      };
+      await api("/hub/features", "POST", f);
+      await api("/hub/model-filter", "POST", {
+        excludePaid: $("mfExcludePaid").checked,
+        freeProvidersOnly: $("mfFreeOnly").checked,
+        autoExcludeNonFree: $("mfAutoExclude").checked,
+        dailyLimit: Number($("dailyLimit").value) || 0,
+      });
+      try { localStorage.setItem("mh-theme", $("themeLight").checked ? "light" : "dark"); } catch {}
+      // startMinimized via features (se supportato)
+      await api("/hub/features", "POST", { startMinimized: $("startMin").checked });
+      $("status").textContent = "✓ Salvato";
+      setTimeout(() => { $("status").textContent = ""; }, 2000);
+    }
+
+    $("save").onclick = save;
+    $("openPanel").onclick = () => { try { window.opener && window.opener.focus(); } catch {} };
+    load();
+  </script>
+</body>
+</html>

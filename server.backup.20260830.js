@@ -67,7 +67,7 @@ const SIGNUP_URLS = {
   xai: "https://console.x.ai",
   zai: "https://z.ai/manage-apikey/apikey-list"
 };
-const VERSION = "0.7.15";
+const VERSION = "0.7.14";
 let cacheOn = process.env.MODELHUB_CACHE !== "0";
 let autoProbeOn = AUTO_PROBE;
 const UA_HTTP = new http.Agent({ keepAlive: true, maxSockets: 64 });
@@ -636,8 +636,7 @@ function featuresCfg() {
   return {
     cache: typeof f.cache === "boolean" ? f.cache : cacheOn,
     autoProbe: typeof f.autoProbe === "boolean" ? f.autoProbe : autoProbeOn,
-    smartFallback: !!f.smartFallback,
-    startMinimized: !!f.startMinimized
+    smartFallback: !!f.smartFallback
   };
 }
 function enhancerCfg() {
