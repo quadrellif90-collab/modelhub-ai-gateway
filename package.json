@@ -26,6 +26,7 @@
     "directories": {
       "output": "dist"
     },
+    "asar": false,
     "files": [
       "main.js",
       "server.js",
