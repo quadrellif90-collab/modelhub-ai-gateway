@@ -14,7 +14,7 @@ let STATE = null;
 let selectedProfile = "auto";
 let profileOrder = [];
 const UI = Object.assign(
-  { collapsed: {}, search: "", filter: "all", sort: "default", compact: false },
+  { collapsed: {}, search: "", filter: "all", sort: "default" },
   (() => { try { return JSON.parse(localStorage.getItem("mh-ui") || "{}"); } catch { return {}; } })()
 );
 function saveUI() { try { localStorage.setItem("mh-ui", JSON.stringify(UI)); } catch {} }
@@ -80,7 +80,6 @@ function render(s) {
 
 function renderProviders(s) {
   const wrap = document.getElementById("providers");
-  wrap.classList.toggle("compact", !!UI.compact);
   wrap.innerHTML = "";
   const byProv = {};
   for (const m of s.models) (byProv[m.provider] ||= []).push(m);
@@ -181,16 +180,10 @@ function renderProviders(s) {
           <div class="minfo">${m.requests} req · ${(m.dailyTok / 1000).toFixed(1)}k tok ogg · ${speed} · ${fmtCost(m.dailyCost)} ogg</div>
         </div>
         <div class="mstat">${stat} ${verif}<br/>${m.lastError ? esc(m.lastError).slice(0, 40) : ""}</div>
-        <button class="btn mini curl" data-id="${esc(m.id)}" title="Copia comando curl di esempio">curl</button>
       `;
       row.querySelector("input").onchange = async (e) => {
         await api("/hub/toggle", "POST", { id: m.id, enabled: e.target.checked });
         poll();
-      };
-      row.querySelector(".curl").onclick = async () => {
-        const curl = buildCurl(m.id, m.free);
-        try { await navigator.clipboard.writeText(curl); } catch { /* clipboard may be blocked */ }
-        flash(`Copiato curl per ${m.id}`);
       };
       list.appendChild(row);
     }
@@ -762,11 +755,6 @@ document.getElementById("scanBtn").onclick = async () => {
 
 function esc(s) {
   return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-}
-
-function buildCurl(id, free) {
-  const auth = free ? "" : "\n  -H \"Authorization: Bearer $MODELHUB_KEY\"";
-  return "curl http://127.0.0.1:8787/v1/chat/completions \\\n  -H \"Content-Type: application/json\"" + auth + " \\\n  -d '{\"model\":\"" + id + "\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Ciao!\"}]}'";
 }
 
 let flashTimer = null;
