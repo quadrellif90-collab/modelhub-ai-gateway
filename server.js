@@ -67,7 +67,7 @@ const SIGNUP_URLS = {
   xai: "https://console.x.ai",
   zai: "https://z.ai/manage-apikey/apikey-list"
 };
-const VERSION = "0.7.37";
+const VERSION = "0.7.38";
 let cacheOn = process.env.MODELHUB_CACHE !== "0";
 let autoProbeOn = AUTO_PROBE;
 const UA_HTTP = new http.Agent({ keepAlive: true, maxSockets: 64 });
@@ -481,9 +481,10 @@ function resolveProfile(requested, messages) {
   if (requested && requested !== "auto" && !String(requested).startsWith("auto-intent")) return requested;
   const last = (messages || []).filter(m => m.role === "user").pop();
   const txt = last ? (typeof last.content === "string" ? last.content : JSON.stringify(last.content)) : "";
-  const it = classifyPrompt(txt);
+  const it = classifyPrompt(txt, { messages });
   if (it.code) return "auto-code";
   if (it.reasoning) return "auto-reasoning";
+  if (it.vision) return "auto"; // vision: resta su auto (copre i modelli vision)
   if (it.fast) return "auto-fast";
   return "auto";
 }
