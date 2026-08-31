@@ -1,6 +1,6 @@
 {
   "name": "modelhub-ai-gateway",
-  "version": "0.7.32",
+  "version": "0.7.33",
   "private": true,
   "main": "main.js",
   "description": "Local multi-provider model aggregator with GUI control panel",

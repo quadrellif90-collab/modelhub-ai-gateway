@@ -67,7 +67,7 @@ const SIGNUP_URLS = {
   xai: "https://console.x.ai",
   zai: "https://z.ai/manage-apikey/apikey-list"
 };
-const VERSION = "0.7.32";
+const VERSION = "0.7.33";
 let cacheOn = process.env.MODELHUB_CACHE !== "0";
 let autoProbeOn = AUTO_PROBE;
 const UA_HTTP = new http.Agent({ keepAlive: true, maxSockets: 64 });
@@ -1895,6 +1895,58 @@ async function mainHandler(req, res) {
         provider: m.provider, label: m.label, free: m.free
       }));
       return sendJSON(res, 200, { object: "list", data: [...profileData, ...modelData] });
+    }
+
+    // Anthropic Messages API (per claude-code e tool Anthropic)
+    if (req.method === "POST" && url === "/v1/messages") {
+      let body = "";
+      for await (const c of req) body += c;
+      let ab;
+      try { ab = JSON.parse(body); } catch { res.writeHead(400); return res.end("bad json"); }
+      if (!ab || !ab.model) { res.writeHead(400); return res.end("missing model"); }
+      if (!ab.max_tokens) ab.max_tokens = 1024;
+      // Converte Anthropic -> OpenAI
+      const oaiMessages = [];
+      if (ab.system) {
+        const sys = typeof ab.system === "string" ? ab.system : (Array.isArray(ab.system) ? ab.system.map(b => b.text || "").join("") : "");
+        if (sys) oaiMessages.push({ role: "system", content: sys });
+      }
+      for (const m of (ab.messages || [])) {
+        oaiMessages.push({ role: m.role === "assistant" ? "assistant" : "user", content: m.content });
+      }
+      const oai = {
+        model: ab.model,
+        messages: oaiMessages,
+        max_tokens: ab.max_tokens,
+        temperature: ab.temperature != null ? ab.temperature : 1,
+        stream: !!ab.stream
+      };
+      const key = keyIdFor(req);
+      if (oai.stream) {
+        res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive" });
+        return streamWithFailover(oai, res, "anthropic");
+      }
+      try {
+        const r = await postWithFailover(oai, key);
+        if (!r.ok) { res.writeHead(502, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ type: "error", error: { type: "upstream_error", message: r.error || "upstream failed" } })); }
+        const content = (r.data && r.data.choices && r.data.choices[0] && r.data.choices[0].message && r.data.choices[0].message.content) || "";
+        const usage = (r.data && r.data.usage) || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+        const out = {
+          id: "msg_" + Date.now().toString(36),
+          type: "message",
+          role: "assistant",
+          model: ab.model,
+          content: [{ type: "text", text: content }],
+          stop_reason: "end_turn",
+          stop_sequence: null,
+          usage: { input_tokens: usage.prompt_tokens || 0, output_tokens: usage.completion_tokens || 0 }
+        };
+        res.writeHead(200, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify(out));
+      } catch (e) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ type: "error", error: { type: "internal_error", message: String(e.message || e) } }));
+      }
     }
 
     // OpenAI streaming
