@@ -67,7 +67,7 @@ const SIGNUP_URLS = {
   xai: "https://console.x.ai",
   zai: "https://z.ai/manage-apikey/apikey-list"
 };
-const VERSION = "0.7.34";
+const VERSION = "0.7.35";
 let cacheOn = process.env.MODELHUB_CACHE !== "0";
 let autoProbeOn = AUTO_PROBE;
 const UA_HTTP = new http.Agent({ keepAlive: true, maxSockets: 64 });
@@ -1837,7 +1837,7 @@ function promMetrics() {
 // HTTP server
 // ---------------------------------------------------------------------------
 const startTime = Date.now();
-const OPEN_PATHS = new Set(["/v1/models", "/models", "/api/tags", "/api/show"]);
+const OPEN_PATHS = new Set(["/v1/models", "/models", "/api/tags", "/api/show", "/v1/messages"]);
 
 // --- rate limit per IP su API di controllo (/hub/*) ---
 const RATE_WINDOW_MS = 60_000;
