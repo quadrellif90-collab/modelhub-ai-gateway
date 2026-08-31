@@ -1589,7 +1589,6 @@ async function handleControl(req, res, url) {
         talkcody: { name: "talkcody", label: "TalkCody", port: 8795, profile: "auto-code", basePath: "/v1" },
         ollama: { name: "ollama", label: "Ollama-compatible", port: 11434, profile: "", basePath: "/api" },
         claude: { name: "claude", label: "Claude Code (via /v1)", port: 8796, profile: "auto", basePath: "/v1" },
-        "puter-glm": { name: "puter-glm", label: "Puter GLM (free unlimited)", port: 8797, profile: "auto", basePath: "/v1" },
         "claude-messages": { name: "claude-messages", label: "Anthropic /v1/messages", port: 8796, profile: "auto", basePath: "/v1/messages" }
       };
       const p = PRESETS[body.preset];
