@@ -147,12 +147,19 @@ function renderProviders(s) {
       keyRow.style.margin = "8px 0";
       const inp = document.createElement("input");
       inp.placeholder = "API key per " + p.name;
-      inp.value = hasKey ? "••••••••" : "";
+      // Preserva il valore digitato durante i poll periodici (altrimenti il re-render lo cancella)
+      const draft = (window.__keyDrafts && window.__keyDrafts[p.name]) || null;
+      inp.value = draft || (hasKey ? "••••••••" : "");
+      inp.oninput = () => {
+        window.__keyDrafts = window.__keyDrafts || {};
+        if (inp.value && inp.value !== "••••••••") window.__keyDrafts[p.name] = inp.value;
+        else delete window.__keyDrafts[p.name];
+      };
       const eye = document.createElement("button");
       eye.className = "btn mini"; eye.textContent = hasKey ? "👁" : ""; eye.title = "mostra/nascondi chiave";
       eye.disabled = !hasKey;
       eye.onclick = async () => {
-        if (inp.dataset.revealed) { inp.value = "••••••••"; delete inp.dataset.revealed; return; }
+        if (inp.dataset.revealed) { inp.value = "••••••••"; delete window.__keyDrafts[p.name]; return; }
         const r = await api("/hub/key/reveal", "POST", { provider: p.name });
         if (r.ok) { inp.value = r.key; inp.dataset.revealed = "1"; }
         else alert("Nessuna chiave salvata per " + p.name);
@@ -161,6 +168,7 @@ function renderProviders(s) {
       save.className = "btn"; save.textContent = "Salva";
       save.onclick = async () => {
         await api("/hub/keys", "POST", { provider: p.name, key: inp.value && inp.value !== "••••••••" ? inp.value : "" });
+        if (window.__keyDrafts) delete window.__keyDrafts[p.name];
         poll();
       };
       keyRow.appendChild(inp); keyRow.appendChild(eye); keyRow.appendChild(save);
