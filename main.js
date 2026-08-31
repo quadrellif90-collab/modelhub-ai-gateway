@@ -155,11 +155,11 @@ function createWindow() {
   });
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (url === "modelhub://widget") { toggleWidget(); return { action: "deny" }; }
-    if (url === "modelhub://settings") { createSettingsWindow(); return { action: "deny" }; }
     if (/^https?:\/\//i.test(url)) { shell.openExternal(url); return { action: "deny" }; }
     // Apri file locali (settings.html, widget.html) come nuove finestre Electron
     if (/^[a-z-]+\.html/i.test(url) || url.startsWith("file://")) {
       const name = url.split("?")[0].split("#")[0].replace(/^.*\//, "");
+      if (name === "settings.html") { createSettingsWindow(); return { action: "deny" }; }
       const w = new BrowserWindow({
         width: 560, height: 720, show: true, frame: true, resizable: true, icon: ICON,
         webPreferences: { nodeIntegration: false, contextIsolation: true }

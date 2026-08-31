@@ -520,8 +520,8 @@ document.getElementById("profileSelect").onchange = (e) => {
 // ripristina l'ultimo profilo selezionato
 try { const sp = localStorage.getItem("mh-profile"); if (sp) selectedProfile = sp; } catch {}
 document.getElementById("settingsBtn").onclick = () => {
-  // instradato dal main.js (setWindowOpenHandler -> createSettingsWindow)
-  window.open("modelhub://settings");
+  // il setWindowOpenHandler in main.js intercetta "settings.html" e apre la finestra
+  window.open("settings.html");
 };
 // Drawer laterale (slide-in) — sostituisce la vecchia sidebar
 (function () {
