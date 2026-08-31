@@ -67,7 +67,7 @@ const SIGNUP_URLS = {
   xai: "https://console.x.ai",
   zai: "https://z.ai/manage-apikey/apikey-list"
 };
-const VERSION = "0.7.31";
+const VERSION = "0.7.32";
 let cacheOn = process.env.MODELHUB_CACHE !== "0";
 let autoProbeOn = AUTO_PROBE;
 const UA_HTTP = new http.Agent({ keepAlive: true, maxSockets: 64 });
@@ -1501,15 +1501,38 @@ async function handleControl(req, res, url) {
   }
   if (url === "/hub/servers" && req.method === "POST") {
     if (!Array.isArray(prefs.servers)) prefs.servers = [];
+    const norm = (s) => ({
+      name: s.name || String(s.port),
+      label: s.label || s.name || String(s.port),
+      port: Number(s.port),
+      profile: s.profile || "",
+      basePath: s.basePath || "",
+      enabled: s.enabled !== false
+    });
     if (body.action === "add" && body.port) {
-      prefs.servers.push({ name: body.name || String(body.port), port: Number(body.port), profile: body.profile || "", enabled: true });
+      prefs.servers.push(norm(body));
+    } else if (body.action === "preset" && body.preset) {
+      // Server dedicati preconfigurati per i tool più comuni
+      const PRESETS = {
+        trae:      { name: "trae",      label: "Trae (IDE agent)",      port: 8791, profile: "auto",       basePath: "/v1" },
+        opencode:  { name: "opencode",  label: "OpenCode",              port: 8792, profile: "auto",       basePath: "/v1" },
+        codex:     { name: "codex",     label: "OpenAI Codex CLI",      port: 8793, profile: "auto",       basePath: "/v1" },
+        kodu:      { name: "kodu",      label: "Kodu AI",               port: 8794, profile: "auto",       basePath: "/v1" },
+        talkcody:  { name: "talkcody",  label: "TalkCody",              port: 8795, profile: "auto-code",  basePath: "/v1" },
+        ollama:    { name: "ollama",    label: "Ollama-compatible",      port: 11434, profile: "",          basePath: "/api" },
+        claude:    { name: "claude",    label: "Claude Code (via /v1)",  port: 8796, profile: "auto",       basePath: "/v1" }
+      };
+      const p = PRESETS[body.preset];
+      if (!p) return sendJSON(res, 400, { ok: false, error: "preset sconosciuto" });
+      if (prefs.servers.some(s => s.port === p.port)) return sendJSON(res, 400, { ok: false, error: "porta " + p.port + " già usata" });
+      prefs.servers.push(norm(p));
     } else if (body.action === "remove" && body.port) {
       prefs.servers = prefs.servers.filter(s => s.port !== Number(body.port));
     } else if (body.action === "toggle" && body.port) {
       const s = prefs.servers.find(s => s.port === Number(body.port));
       if (s) s.enabled = !s.enabled;
     } else if (body.action === "set" && Array.isArray(body.servers)) {
-      prefs.servers = body.servers;
+      prefs.servers = body.servers.map(norm);
     }
     writeJSON(PREFS_FILE, prefs, log);
     return sendJSON(res, 200, { ok: true, servers: prefs.servers });
@@ -2401,15 +2424,22 @@ function startHub() {
   // (potentially slow) startup model verify is still running in the background.
   server.listen(PORT, "127.0.0.1", () => log(`ModelHub listening on ${PORT}`));
   // Server multipli su porte diverse (per tool che vogliono endpoint/porta dedicata).
-  // Ogni entry: { name, port, profile (opzionale -> forza quel profile su questa porta), enabled }
+  // Ogni entry: { name, label, port, profile (opzionale -> forza quel profile),
+  //               basePath (opzionale -> es. "/v1" o "/api"; se vuoto risponde a entrambi), enabled }
   const extraServers = Array.isArray(prefs.servers) ? prefs.servers.filter(s => s && s.enabled && s.port && s.port !== PORT) : [];
   for (const s of extraServers) {
     try {
       const extra = http.createServer((req, res) => {
+        // Se il server ha un basePath fisso, risponde solo a quel prefisso
+        // (es. "/api" per tool Ollama-only, "/v1" per tool OpenAI-only).
+        if (s.basePath && !req.url.startsWith(s.basePath)) {
+          res.writeHead(404, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ error: "endpoint non su questo server; usa basePath " + s.basePath }));
+        }
         if (s.profile) req.__fixedProfile = s.profile;
         mainHandler(req, res);
       });
-      extra.listen(s.port, "127.0.0.1", () => log(`ModelHub extra server "${s.name || s.port}" on ${s.port}` + (s.profile ? ` (profile: ${s.profile})` : "")));
+      extra.listen(s.port, "127.0.0.1", () => log(`ModelHub server "${s.label || s.name || s.port}" on :${s.port}` + (s.profile ? ` (profile: ${s.profile})` : "") + (s.basePath ? ` (base: ${s.basePath})` : "")));
     } catch (e) {
       log(`extra server ${s.port} failed: ${e.message}`);
     }

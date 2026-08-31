@@ -762,30 +762,52 @@ async function renderServers() {
     const r = await api("/hub/servers");
     const arr = (r && r.servers) || [];
     if (!arr.length) { box.innerHTML = "(nessun server extra — solo porta " + (r.mainPort || 8787) + ")"; return; }
-    box.innerHTML = arr.map(s => `<div style="margin:4px 0">${esc(s.name)} :${s.port}` +
-      (s.profile ? ` [${esc(s.profile)}]` : "") + ` ${s.enabled ? "✓" : "✗"} ` +
-      `<a href="#" data-port="${s.port}" data-act="toggle" style="color:var(--accent)">${s.enabled ? "disattiva" : "attiva"}</a> ` +
-      `<a href="#" data-port="${s.port}" data-act="remove" style="color:var(--bad)">rimuovi</a></div>`).join("");
+    box.innerHTML = arr.map(s => {
+      const base = s.basePath || "";
+      const url = `http://127.0.0.1:${s.port}${base}/chat/completions`;
+      return `<div style="margin:6px 0;padding:6px;border:1px solid var(--border);border-radius:6px">
+        <b>${esc(s.label || s.name)}</b> <span class="hint">:${s.port}${base ? " (" + esc(base) + ")" : ""}${s.profile ? " [" + esc(s.profile) + "]" : ""}</span> ${s.enabled ? "✓" : "✗"}
+        <div class="hint" style="word-break:break-all">${esc(url)} <a href="#" data-copy="${esc(url)}" style="color:var(--accent)">copia</a></div>
+        <a href="#" data-port="${s.port}" data-act="toggle" style="color:var(--accent)">${s.enabled ? "disattiva" : "attiva"}</a>
+        <a href="#" data-port="${s.port}" data-act="remove" style="color:var(--bad)">rimuovi</a>
+      </div>`;
+    }).join("");
     box.querySelectorAll("a[data-act]").forEach(a => a.onclick = async (e) => {
       e.preventDefault();
       await api("/hub/servers", "POST", { action: a.dataset.act, port: Number(a.dataset.port) });
       renderServers();
       toast("Riavvia l'app per applicare");
     });
+    box.querySelectorAll("a[data-copy]").forEach(a => a.onclick = async (e) => {
+      e.preventDefault();
+      try { await navigator.clipboard.writeText(a.dataset.copy); toast("URL copiato"); }
+      catch { toast(a.dataset.copy); }
+    });
   } catch { box.textContent = "errore lettura server"; }
 }
 document.getElementById("srv_add").onclick = async () => {
   const port = Number(document.getElementById("srv_port").value);
   const name = document.getElementById("srv_name").value || String(port);
+  const label = document.getElementById("srv_label").value || "";
   const profile = document.getElementById("srv_profile").value || "";
+  const basePath = document.getElementById("srv_base").value || "";
   if (!port) return toast("porta richiesta");
-  await api("/hub/servers", "POST", { action: "add", name, port, profile });
+  await api("/hub/servers", "POST", { action: "add", name, label, port, profile, basePath });
   document.getElementById("srv_port").value = "";
   document.getElementById("srv_name").value = "";
+  document.getElementById("srv_label").value = "";
   document.getElementById("srv_profile").value = "";
+  document.getElementById("srv_base").value = "";
   renderServers();
   toast("Server aggiunto — riavvia l'app per attivarlo");
 };
+// Preset tool: crea un server dedicato preconfigurato
+document.querySelectorAll("button[data-preset]").forEach(b => b.onclick = async () => {
+  const preset = b.dataset.preset;
+  await api("/hub/servers", "POST", { action: "preset", preset });
+  renderServers();
+  toast("Preset '" + preset + "' aggiunto — riavvia l'app per attivarlo");
+});
 
 function esc(s) {
   return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
