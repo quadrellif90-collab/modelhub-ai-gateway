@@ -67,7 +67,7 @@ const SIGNUP_URLS = {
   xai: "https://console.x.ai",
   zai: "https://z.ai/manage-apikey/apikey-list"
 };
-const VERSION = "0.7.35";
+const VERSION = "0.7.36";
 let cacheOn = process.env.MODELHUB_CACHE !== "0";
 let autoProbeOn = AUTO_PROBE;
 const UA_HTTP = new http.Agent({ keepAlive: true, maxSockets: 64 });
@@ -402,6 +402,9 @@ function mergedOrder(manualArr, generated, enabledSet, strict) {
 // (sono ricalcolati a ogni avvio), così prefs.json resta piccolo e veloce da scrivere.
 const GENERATED_PROFILES = ["auto", "auto-code", "auto-reasoning", "auto-fast", "free-pool"];
 let liveProfiles = {};
+// Riferimento alla richiesta attiva, così postWithFailover/streamWithFailover
+// (definiti fuori da mainHandler) possono leggere req.__fixedProfile.
+let _activeReq = null;
 
 function rebuildProfiles() {
   const enabledIds = models.filter(m => m.enabled && isChatModel(m.id)).map(m => m.id);
@@ -841,7 +844,7 @@ async function semEmbed(text) {
 
 // ---------------------------------------------------------------------------
 async function postWithFailover(openaiBody, key) {
-  const profile = resolveProfile(req.__fixedProfile || openaiBody.model, openaiBody.messages);
+  const profile = resolveProfile(_activeReq.__fixedProfile || openaiBody.model, openaiBody.messages);
   const strategy = strategyFor(profile);
   const tried = [];
   const ck = cacheKey(openaiBody);
@@ -986,7 +989,7 @@ const translators = {
 
 function streamWithFailover(openaiBody, res, protocol) {
   return new Promise((resolve) => {
-    const profile = resolveProfile(req.__fixedProfile || openaiBody.model, openaiBody.messages);
+    const profile = resolveProfile(_activeReq.__fixedProfile || openaiBody.model, openaiBody.messages);
     const candidates = selectCandidates(openaiBody.model, profile);
     const translator = translators[protocol];
     const makeXlat = typeof translator === "function" ? translator : () => translator;
@@ -1863,6 +1866,7 @@ function rotatedRequestLogPath() {
 const CSP = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'";
 
 async function mainHandler(req, res) {
+  _activeReq = req;
   const url = req.url.split("?")[0];
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-api-key, x-modelhub-token");
