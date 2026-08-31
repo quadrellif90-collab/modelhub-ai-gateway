@@ -17502,7 +17502,18 @@
       "needsKey": true,
       "authId": "zai",
       "baseURL": "https://api.z.ai/v1/chat/completions",
-      "models": []
+      "keyUrl": "https://z.ai/usercenter/apikeys",
+      "models": [
+        { "name": "glm-4.7", "free": false },
+        { "name": "glm-4.7-flash", "free": false },
+        { "name": "glm-4.7-flashx", "free": false },
+        { "name": "glm-4.6", "free": false },
+        { "name": "glm-4.6v", "free": false },
+        { "name": "glm-4.5", "free": false },
+        { "name": "glm-4.5v", "free": false },
+        { "name": "glm-4.5-air", "free": false },
+        { "name": "glm-4-plus", "free": false }
+      ]
     },
     {
       "name": "freellmpool",

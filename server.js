@@ -67,7 +67,7 @@ const SIGNUP_URLS = {
   xai: "https://console.x.ai",
   zai: "https://z.ai/manage-apikey/apikey-list"
 };
-const VERSION = "0.7.41";
+const VERSION = "0.7.42";
 let cacheOn = process.env.MODELHUB_CACHE !== "0";
 let autoProbeOn = AUTO_PROBE;
 const UA_HTTP = new http.Agent({ keepAlive: true, maxSockets: 64 });
@@ -1786,7 +1786,18 @@ async function handleControl(req, res, url) {
       for (const [provider, key] of Object.entries(body)) {
         if (provider === "key" || provider === "tokens" || provider === "spend") continue;
         if (typeof key !== "string" || !key.trim()) continue;
-        auth[provider] = key.trim();
+        // match loose: "z.ai" -> "zai", "OpenAI" -> "openai", ecc.
+        let pid = provider;
+        const exact = config.providers.find(p => p.name === pid);
+        if (!exact) {
+          const norm = provider.toLowerCase().replace(/[^a-z0-9]/g, "");
+          const loose = config.providers.find(p => p.name.toLowerCase().replace(/[^a-z0-9]/g, "") === norm)
+            || config.providers.find(p => (p.label || "").toLowerCase().replace(/[^a-z0-9]/g, "") === norm);
+          if (loose) pid = loose.name;
+        }
+        const p = config.providers.find(x => x.name === pid);
+        const aid = (p && p.authId && !p.authId.startsWith("env:")) ? p.authId : pid;
+        auth[aid] = key.trim();
         count++;
       }
       if (count > 0) {
