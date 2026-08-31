@@ -67,7 +67,7 @@ const SIGNUP_URLS = {
   xai: "https://console.x.ai",
   zai: "https://z.ai/manage-apikey/apikey-list"
 };
-const VERSION = "0.7.29";
+const VERSION = "0.7.30";
 let cacheOn = process.env.MODELHUB_CACHE !== "0";
 let autoProbeOn = AUTO_PROBE;
 const UA_HTTP = new http.Agent({ keepAlive: true, maxSockets: 64 });
@@ -397,29 +397,31 @@ function mergedOrder(manualArr, generated, enabledSet, strict) {
   if (strict) return kept.concat(appended).filter(id => enabledSet.has(id));
   return kept.concat(appended);
 }
+// Profili "live" (in memoria): contengono TUTTI i profili attivi, inclusi i 5
+// pool generati automaticamente. I 5 pool NON vengono persistiti in prefs.json
+// (sono ricalcolati a ogni avvio), così prefs.json resta piccolo e veloce da scrivere.
+const GENERATED_PROFILES = ["auto", "auto-code", "auto-reasoning", "auto-fast", "free-pool"];
+let liveProfiles = {};
+
 function rebuildProfiles() {
   const enabledIds = models.filter(m => m.enabled && isChatModel(m.id)).map(m => m.id);
   const enabledSet = new Set(enabledIds);
   const scored = enabledIds.slice().sort((a, b) => autorouteScore(b) - autorouteScore(a));
-  // Profili specializzati: contengono SOLO i modelli della categoria (strict).
   const codeIds = scored.filter(id => classify(id).code);
   const reasoningIds = scored.filter(id => classify(id).reasoning);
   const fastIds = scored.filter(id => classify(id).fast);
-  const defaultMerge = (prof, generated, strict, forceRegen) => {
-    // forceRegen=true: ignora l'array persistito, rigenera SEMPRE dalla categoria.
-    const base = forceRegen ? generated : (Array.isArray(prefs.profiles[prof]) && prefs.profiles[prof].length ? prefs.profiles[prof] : generated);
-    prefs.profiles[prof] = mergedOrder(base, generated, enabledSet, strict);
+  // I 5 pool generati: SEMPRE ricalcolati dalla categoria corrente (forceRegen).
+  const generated = {
+    "auto": scored,
+    "auto-code": codeIds,
+    "auto-reasoning": reasoningIds,
+    "auto-fast": fastIds,
+    "free-pool": buildFreePool()
   };
-  defaultMerge("auto", scored, false);
-  // I pool specializzati sono SEMPRE rigenerati dalla categoria corrente: non riusare
-  // gli array persistiti in prefs.json (altrimenti una vecchia classifica rimane "incollata"
-  // e auto-code/auto-reasoning restano alias del pool intero dopo una correzione di classify()).
-  defaultMerge("auto-code", codeIds, true, true);
-  defaultMerge("auto-reasoning", reasoningIds, true, true);
-  defaultMerge("auto-fast", fastIds, true, true);
-  defaultMerge("free-pool", buildFreePool(), true, true);
+  // Profili personalizzati (persistiti in prefs.profiles): mantieni ordine utente,
+  // scarta modelli non più esistenti/disabilitati, accoda i nuovi abilitati.
   for (const prof of Object.keys(prefs.profiles)) {
-    if (["auto", "auto-code", "auto-reasoning", "auto-fast", "free-pool"].includes(prof)) continue;
+    if (GENERATED_PROFILES.includes(prof)) continue;
     const arr = prefs.profiles[prof];
     if (!Array.isArray(arr)) { prefs.profiles[prof] = enabledIds.slice(); continue; }
     const set = new Set(arr);
@@ -428,8 +430,19 @@ function rebuildProfiles() {
       ...enabledIds.filter(id => !set.has(id))
     ];
   }
+  // liveProfiles = generati (in memoria) + personalizzati (da prefs)
+  liveProfiles = Object.assign({}, generated);
+  for (const prof of Object.keys(prefs.profiles)) {
+    if (GENERATED_PROFILES.includes(prof)) continue;
+    liveProfiles[prof] = prefs.profiles[prof];
+  }
+  // I 5 pool NON finiscono in prefs.profiles -> prefs.json resta piccolo
+  for (const p of GENERATED_PROFILES) delete prefs.profiles[p];
   writeJSON(PREFS_FILE, prefs, log);
 }
+
+// Helper: tutti i profili attivi (generati + personalizzati) per le API.
+function getProfiles() { return liveProfiles; }
 
 // ---------------------------------------------------------------------------
 // v0.7: per-key quota, intent routing, experiments, plugins, webhook, audit
@@ -669,7 +682,7 @@ async function maybeEnhance(body, req) {
     if (original.length < 16 || original.length > cfg.maxChars) return;
     em = modelMap.get(cfg.model);
     if (!em || !em.enabled) {
-      const altId = (prefs.profiles["free-pool"] || []).find(id => {
+      const altId = (getProfiles()["free-pool"] || []).find(id => {
         const x = modelMap.get(id);
         return x && x.enabled && x.free && (!x.failUntil || x.failUntil <= Date.now());
       });
@@ -718,7 +731,7 @@ function selectCandidates(modelId, profile) {
   if (modelId && modelMap.has(modelId) && modelMap.get(modelId).enabled) return [modelId];
   const stripped = modelId && modelId.includes("/") ? modelId.slice(modelId.indexOf("/") + 1) : modelId;
   if (stripped && modelMap.has(stripped) && modelMap.get(stripped).enabled) return [stripped];
-  const order = maybeExperiment(profile, prefs.profiles[profile] || prefs.profiles.auto || []);
+  const order = maybeExperiment(profile, getProfiles()[profile] || getProfiles().auto || []);
   const now = Date.now();
   const healthy = order.filter(id => {
     const m = modelMap.get(id);
@@ -1260,8 +1273,8 @@ function controlState() {
     uptimeSec: Math.round((Date.now() - startTime) / 1000),
     providers: config.providers.map(p => ({ name: p.name, label: p.label, needsKey: !!p.needsKey, modelCount: (p.models || []).length, keyUrl: p.keyUrl || SIGNUP_URLS[p.name] || "" })),
     keysPresent: config.providers.reduce((a, p) => { a[p.name] = !!(p.authId && resolveKey(p.authId)); return a; }, {}),
-    profiles: Object.keys(prefs.profiles),
-    profileOrder: prefs.profiles,
+    profiles: Object.keys(getProfiles()),
+    profileOrder: getProfiles(),
     strategies: prefs.strategy,
     enhancer: enhancerCfg(),
     leaderboard: models.filter(m => m.enabled && isChatModel(m.id)).map(m => ({
@@ -1464,19 +1477,23 @@ async function handleControl(req, res, url) {
   }
   if (url === "/hub/reorder" && Array.isArray(body.order)) {
     const prof = body.profile || "auto";
-    prefs.profiles[prof] = body.order.filter(id => modelMap.has(id));
+    const filtered = body.order.filter(id => modelMap.has(id));
+    prefs.profiles[prof] = filtered;
+    liveProfiles[prof] = filtered;
     writeJSON(PREFS_FILE, prefs, log);
     return sendJSON(res, 200, { ok: true });
   }
   if (url === "/hub/profile/create" && body.name) {
     if (!prefs.profiles[body.name]) prefs.profiles[body.name] = models.filter(m => m.enabled).map(m => m.id);
+    liveProfiles[body.name] = prefs.profiles[body.name];
     writeJSON(PREFS_FILE, prefs, log);
-    return sendJSON(res, 200, { ok: true, profiles: Object.keys(prefs.profiles) });
+    return sendJSON(res, 200, { ok: true, profiles: Object.keys(getProfiles()) });
   }
   if (url === "/hub/profile/delete" && body.name && !DEFAULT_PROFILES.includes(body.name)) {
     delete prefs.profiles[body.name];
+    delete liveProfiles[body.name];
     writeJSON(PREFS_FILE, prefs, log);
-    return sendJSON(res, 200, { ok: true, profiles: Object.keys(prefs.profiles) });
+    return sendJSON(res, 200, { ok: true, profiles: Object.keys(getProfiles()) });
   }
   if (url === "/hub/keys" && body.provider) {
     const key = body.key || "";
@@ -1827,7 +1844,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && (url === "/v1/models" || url === "/models")) {
-      const profileData = Object.keys(prefs.profiles).map(name => ({
+      const profileData = Object.keys(getProfiles()).map(name => ({
         id: name, object: "model", owned_by: "modelhub", root: name,
         provider: "modelhub", label: "Profilo: " + name, free: false, isProfile: true
       }));
@@ -2127,7 +2144,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "GET" && url === "/api/tags") {
       const names = models.filter(m => m.enabled).map(m => m.id);
-      for (const p of Object.keys(prefs.profiles)) names.push(p);
+      for (const p of Object.keys(getProfiles())) names.push(p);
       return sendJSON(res, 200, { models: names.map(n => ({ name: n, model: n })) });
     }
     if (req.method === "POST" && url === "/api/show") {
@@ -2256,7 +2273,7 @@ async function verifyHeads() {
     const K = Math.max(3, settingsCfg().verifyTopK);
     const ids = [];
     for (const prof of ["auto", "auto-code", "auto-reasoning", "auto-fast", "free-pool"]) {
-      const arr = prefs.profiles[prof] || [];
+      const arr = getProfiles()[prof] || [];
       for (const id of arr.slice(0, K)) {
         const m = modelMap.get(id);
         if (m && m.enabled && isChatModel(id) && !ids.includes(id)) ids.push(id);
