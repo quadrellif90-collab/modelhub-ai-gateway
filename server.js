@@ -67,7 +67,7 @@ const SIGNUP_URLS = {
   xai: "https://console.x.ai",
   zai: "https://z.ai/manage-apikey/apikey-list"
 };
-const VERSION = "0.7.30";
+const VERSION = "0.7.31";
 let cacheOn = process.env.MODELHUB_CACHE !== "0";
 let autoProbeOn = AUTO_PROBE;
 const UA_HTTP = new http.Agent({ keepAlive: true, maxSockets: 64 });
@@ -841,7 +841,7 @@ async function semEmbed(text) {
 
 // ---------------------------------------------------------------------------
 async function postWithFailover(openaiBody, key) {
-  const profile = resolveProfile(openaiBody.model, openaiBody.messages);
+  const profile = resolveProfile(req.__fixedProfile || openaiBody.model, openaiBody.messages);
   const strategy = strategyFor(profile);
   const tried = [];
   const ck = cacheKey(openaiBody);
@@ -986,7 +986,7 @@ const translators = {
 
 function streamWithFailover(openaiBody, res, protocol) {
   return new Promise((resolve) => {
-    const profile = resolveProfile(openaiBody.model, openaiBody.messages);
+    const profile = resolveProfile(req.__fixedProfile || openaiBody.model, openaiBody.messages);
     const candidates = selectCandidates(openaiBody.model, profile);
     const translator = translators[protocol];
     const makeXlat = typeof translator === "function" ? translator : () => translator;
@@ -1495,6 +1495,25 @@ async function handleControl(req, res, url) {
     writeJSON(PREFS_FILE, prefs, log);
     return sendJSON(res, 200, { ok: true, profiles: Object.keys(getProfiles()) });
   }
+  // Server multipli su porte diverse (riavvio richiesto per applicare nuove porte)
+  if (url === "/hub/servers" && req.method === "GET") {
+    return sendJSON(res, 200, { servers: Array.isArray(prefs.servers) ? prefs.servers : [], mainPort: PORT });
+  }
+  if (url === "/hub/servers" && req.method === "POST") {
+    if (!Array.isArray(prefs.servers)) prefs.servers = [];
+    if (body.action === "add" && body.port) {
+      prefs.servers.push({ name: body.name || String(body.port), port: Number(body.port), profile: body.profile || "", enabled: true });
+    } else if (body.action === "remove" && body.port) {
+      prefs.servers = prefs.servers.filter(s => s.port !== Number(body.port));
+    } else if (body.action === "toggle" && body.port) {
+      const s = prefs.servers.find(s => s.port === Number(body.port));
+      if (s) s.enabled = !s.enabled;
+    } else if (body.action === "set" && Array.isArray(body.servers)) {
+      prefs.servers = body.servers;
+    }
+    writeJSON(PREFS_FILE, prefs, log);
+    return sendJSON(res, 200, { ok: true, servers: prefs.servers });
+  }
   if (url === "/hub/keys" && body.provider) {
     const key = body.key || "";
     const p = config.providers.find(x => x.name === body.provider);
@@ -1820,7 +1839,7 @@ function rotatedRequestLogPath() {
 }
 const CSP = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'";
 
-const server = http.createServer(async (req, res) => {
+async function mainHandler(req, res) {
   const url = req.url.split("?")[0];
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-api-key, x-modelhub-token");
@@ -1866,7 +1885,7 @@ const server = http.createServer(async (req, res) => {
     if (parsedChat) await maybeEnhance(parsedChat, req);
     if (parsedChat && parsedChat.stream === true) {
       const parsed = parsedChat;
-      const profile = resolveProfile(parsed.model, parsed.messages);
+      const profile = resolveProfile(req.__fixedProfile || parsed.model, parsed.messages);
       const candidates = selectCandidates(parsed.model, profile);
       const chainStart = Date.now();
       const CHAIN_BUDGET = settingsCfg().failoverMs;
@@ -2048,7 +2067,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && url.endsWith("/embeddings")) {
       const parsed = await readBody(req);
       if (!parsed || !parsed.model) { res.writeHead(400); return res.end("missing model"); }
-      const profile = resolveProfile(parsed.model, parsed.messages);
+      const profile = resolveProfile(req.__fixedProfile || parsed.model, parsed.messages);
       const candidates = selectCandidates(parsed.model, profile).slice(0, 3);
       for (const id of candidates) {
         const m = modelMap.get(id);
@@ -2160,7 +2179,9 @@ const server = http.createServer(async (req, res) => {
     if (!res.headersSent) { res.writeHead(500); }
     res.end(JSON.stringify({ error: e.message }));
   }
-});
+}
+
+const server = http.createServer(mainHandler);
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -2379,6 +2400,20 @@ function startHub() {
   // Bind the port IMMEDIATELY so the panel + API respond even while the
   // (potentially slow) startup model verify is still running in the background.
   server.listen(PORT, "127.0.0.1", () => log(`ModelHub listening on ${PORT}`));
+  // Server multipli su porte diverse (per tool che vogliono endpoint/porta dedicata).
+  // Ogni entry: { name, port, profile (opzionale -> forza quel profile su questa porta), enabled }
+  const extraServers = Array.isArray(prefs.servers) ? prefs.servers.filter(s => s && s.enabled && s.port && s.port !== PORT) : [];
+  for (const s of extraServers) {
+    try {
+      const extra = http.createServer((req, res) => {
+        if (s.profile) req.__fixedProfile = s.profile;
+        mainHandler(req, res);
+      });
+      extra.listen(s.port, "127.0.0.1", () => log(`ModelHub extra server "${s.name || s.port}" on ${s.port}` + (s.profile ? ` (profile: ${s.profile})` : "")));
+    } catch (e) {
+      log(`extra server ${s.port} failed: ${e.message}`);
+    }
+  }
   startBackgroundProber();
   startProfileRefresher();
   if (featuresCfg().autoProbe) {

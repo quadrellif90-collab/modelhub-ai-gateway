@@ -70,6 +70,7 @@ function render(s) {
   renderProvidersWithMeta(s);
   renderProfiles(s);
   renderPricing(s);
+  renderServers();
   renderGatewayKeys(s);
   renderEnhancer(s);
   renderSettings(s);
@@ -751,6 +752,39 @@ document.getElementById("scanBtn").onclick = async () => {
   } finally {
     btn.disabled = false;
   }
+};
+
+// Server multipli (porte)
+async function renderServers() {
+  const box = document.getElementById("serversList");
+  if (!box) return;
+  try {
+    const r = await api("/hub/servers");
+    const arr = (r && r.servers) || [];
+    if (!arr.length) { box.innerHTML = "(nessun server extra — solo porta " + (r.mainPort || 8787) + ")"; return; }
+    box.innerHTML = arr.map(s => `<div style="margin:4px 0">${esc(s.name)} :${s.port}` +
+      (s.profile ? ` [${esc(s.profile)}]` : "") + ` ${s.enabled ? "✓" : "✗"} ` +
+      `<a href="#" data-port="${s.port}" data-act="toggle" style="color:var(--accent)">${s.enabled ? "disattiva" : "attiva"}</a> ` +
+      `<a href="#" data-port="${s.port}" data-act="remove" style="color:var(--bad)">rimuovi</a></div>`).join("");
+    box.querySelectorAll("a[data-act]").forEach(a => a.onclick = async (e) => {
+      e.preventDefault();
+      await api("/hub/servers", "POST", { action: a.dataset.act, port: Number(a.dataset.port) });
+      renderServers();
+      toast("Riavvia l'app per applicare");
+    });
+  } catch { box.textContent = "errore lettura server"; }
+}
+document.getElementById("srv_add").onclick = async () => {
+  const port = Number(document.getElementById("srv_port").value);
+  const name = document.getElementById("srv_name").value || String(port);
+  const profile = document.getElementById("srv_profile").value || "";
+  if (!port) return toast("porta richiesta");
+  await api("/hub/servers", "POST", { action: "add", name, port, profile });
+  document.getElementById("srv_port").value = "";
+  document.getElementById("srv_name").value = "";
+  document.getElementById("srv_profile").value = "";
+  renderServers();
+  toast("Server aggiunto — riavvia l'app per attivarlo");
 };
 
 function esc(s) {

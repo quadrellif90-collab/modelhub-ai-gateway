@@ -217,6 +217,18 @@
           <div id="scanOut" class="hint"></div>
         </div>
       </section>
+
+      <section class="panel">
+        <h2>Server multipli (porte)</h2>
+        <p class="hint">Esponi l'hub su porte diverse per tool che non accettano 127.0.0.1:8787. Riavvia l'app dopo aver modificato.</p>
+        <div id="serversList" class="hint"></div>
+        <div class="form">
+          <input id="srv_name" placeholder="nome (es. ollama)" />
+          <input id="srv_port" type="number" placeholder="porta (es. 11434)" min="1024" max="65535" />
+          <input id="srv_profile" placeholder="profile fisso (vuoto = auto)" />
+          <button id="srv_add" class="btn primary">Aggiungi server</button>
+        </div>
+      </section>
     </div>
   </aside>
 
