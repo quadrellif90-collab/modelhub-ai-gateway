@@ -144,7 +144,15 @@ function createWindow() {
     icon: ICON,
     webPreferences: { nodeIntegration: false, contextIsolation: true }
   });
+  const logErr = (m) => { try { fs.appendFileSync(path.join(DATA_DIR, "ui_errors.log"), `[${new Date().toISOString()}] ${m}\n`); } catch {} };
+  win.webContents.on("did-fail-load", (e, code, desc) => logErr(`did-fail-load ${code} ${desc}`));
+  win.webContents.on("crashed", () => logErr("renderer crashed"));
+  win.on("render-process-gone", (e, d) => logErr(`render-process-gone ${d.reason}`));
+  win.webContents.on("console-message", (e, level, msg) => { if (level >= 3) logErr(`console ${level}: ${msg}`); });
   win.loadFile(path.join(DIR, "renderer", "index.html"), CTRL_TOKEN ? { query: { t: CTRL_TOKEN } } : undefined);
+  win.once("ready-to-show", () => {
+    if (!(prefs.features && prefs.features.startMinimized)) { win.show(); win.focus(); }
+  });
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (url === "modelhub://widget") { toggleWidget(); return { action: "deny" }; }
     if (url === "modelhub://settings") { createSettingsWindow(); return { action: "deny" }; }
@@ -161,9 +169,7 @@ function createWindow() {
     }
     return { action: "deny" };
   });
-  // Avvio ridotto: se startMinimized è true, parte solo in tray
-  if (prefs.features && prefs.features.startMinimized) win.hide();
-  else win.show();
+  // Avvio ridotto: se startMinimized è true, parte solo in tray (ready-to-show lo gestisce)
   win.on("close", (e) => {
     if (isQuitting) return;
     e.preventDefault();
@@ -206,7 +212,6 @@ app.whenReady().then(() => {
   createTray();
   createWidget();
   setupAutoUpdate();
-  if (!launchedAtLogin) setTimeout(showWindow, 600);
 });
 
 app.on("window-all-closed", (e) => {
