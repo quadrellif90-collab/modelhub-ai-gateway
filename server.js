@@ -67,7 +67,7 @@ const SIGNUP_URLS = {
   xai: "https://console.x.ai",
   zai: "https://z.ai/manage-apikey/apikey-list"
 };
-const VERSION = "0.7.36";
+const VERSION = "0.7.37";
 let cacheOn = process.env.MODELHUB_CACHE !== "0";
 let autoProbeOn = AUTO_PROBE;
 const UA_HTTP = new http.Agent({ keepAlive: true, maxSockets: 64 });
@@ -1927,7 +1927,6 @@ async function mainHandler(req, res) {
       };
       const key = ""; // l'hub usa le proprie key da auth.json; ignora la key placeholder del tool
       if (oai.stream) {
-        res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive" });
         return streamWithFailover(oai, res, "anthropic");
       }
       try {
