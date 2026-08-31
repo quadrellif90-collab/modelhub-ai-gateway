@@ -67,7 +67,7 @@ const SIGNUP_URLS = {
   xai: "https://console.x.ai",
   zai: "https://z.ai/manage-apikey/apikey-list"
 };
-const VERSION = "0.7.40";
+const VERSION = "0.7.41";
 let cacheOn = process.env.MODELHUB_CACHE !== "0";
 let autoProbeOn = AUTO_PROBE;
 const UA_HTTP = new http.Agent({ keepAlive: true, maxSockets: 64 });
@@ -901,6 +901,7 @@ async function semEmbed(text) {
 // ---------------------------------------------------------------------------
 async function postWithFailover(openaiBody, key) {
   const profile = resolveProfile(_activeReq.__fixedProfile || openaiBody.model, openaiBody.messages);
+  openaiBody.__profile = profile;
   const strategy = strategyFor(profile);
   const tried = [];
   const ck = cacheKey(openaiBody);
@@ -973,14 +974,15 @@ async function postWithFailover(openaiBody, key) {
       if (vec) semCache.add(vec, r.data);
     }
     recordRequest({
-      proto: "chat", reqModel: openaiBody.model, model: id, ok: true, error: "",
+      proto: "chat", reqModel: openaiBody.model, model: id, profile: openaiBody.__profile || "",
+      ok: true, error: "",
       latencyMs: r.latencyMs || 0, ttftMs: null,
       promptTok: r.promptTok || 0, completionTok: r.completionTok || 0, totalTok: r.totalTok || 0,
       cost: computeCost(m, r.promptTok || 0, r.completionTok || 0), cached: false
     });
     return { ok: true, data: r.data, modelId: id, tried };
   }
-  recordRequest({ proto: "chat", reqModel: openaiBody.model, model: null, ok: false, error: lastError, latencyMs: 0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
+  recordRequest({ proto: "chat", reqModel: openaiBody.model, model: null, profile: openaiBody.__profile || "", ok: false, error: lastError, latencyMs: 0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
   return { ok: false, error: lastError };
 }
 
@@ -1046,6 +1048,7 @@ const translators = {
 function streamWithFailover(openaiBody, res, protocol) {
   return new Promise((resolve) => {
     const profile = resolveProfile(_activeReq.__fixedProfile || openaiBody.model, openaiBody.messages);
+    openaiBody.__profile = profile;
     const candidates = selectCandidates(openaiBody.model, profile);
     const translator = translators[protocol];
     const makeXlat = typeof translator === "function" ? translator : () => translator;
@@ -1114,7 +1117,7 @@ function streamWithFailover(openaiBody, res, protocol) {
             giveOnce();
             xlat.onDone(res);
             recordRequest({
-              proto: "stream:" + protocol, reqModel: openaiBody.model, model: id, ok: true, error: "",
+              proto: "stream:" + protocol, reqModel: openaiBody.model, model: id, profile: openaiBody.__profile || "", ok: true, error: "",
               latencyMs: Date.now() - t0, ttftMs: firstAt ? firstAt - t0 : null,
               promptTok: 0, completionTok: 0, totalTok: 0, cost: null, cached: false
             });
@@ -1329,6 +1332,7 @@ function controlState() {
   return {
     version: VERSION,
     port: config.port,
+    servers: Array.isArray(prefs.servers) ? prefs.servers : [],
     uptimeSec: Math.round((Date.now() - startTime) / 1000),
     providers: config.providers.map(p => ({ name: p.name, label: p.label, needsKey: !!p.needsKey, modelCount: (p.models || []).length, keyUrl: p.keyUrl || SIGNUP_URLS[p.name] || "" })),
     keysPresent: config.providers.reduce((a, p) => { a[p.name] = !!(p.authId && resolveKey(p.authId)); return a; }, {}),

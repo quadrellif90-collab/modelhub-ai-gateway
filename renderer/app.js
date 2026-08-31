@@ -32,7 +32,13 @@ async function poll() {
     STATE = s;
     const up = s && s.port;
     document.getElementById("serverDot").className = "dot " + (up ? "on" : "off");
-    document.getElementById("serverText").textContent = up ? `server attivo :${s.port}` : "server offline";
+    if (up) {
+      const extras = (Array.isArray(s.servers) ? s.servers : []).filter(x => x && x.enabled && x.port && x.port !== s.port)
+        .map(x => `${x.port}${x.name ? "(" + x.name + ")" : ""}`).join(" · ");
+      document.getElementById("serverText").textContent = extras ? `:${s.port}  +  ${extras}` : `server attivo :${s.port}`;
+    } else {
+      document.getElementById("serverText").textContent = "server offline";
+    }
     if (s) {
       render(s);
       renderLogs(l.logs || []);
@@ -71,6 +77,7 @@ function render(s) {
   renderProfiles(s);
   renderPricing(s);
   renderServers();
+  renderToolGuide();
   renderGatewayKeys(s);
   renderEnhancer(s);
   renderSettings(s);
@@ -462,8 +469,9 @@ function renderLogs(logs) {
       ? `<span class="ok">ok${l.cached ? " ⚡" : ""}</span>`
       : `<span class="down" title="${esc(l.error || "")}">err</span>`;
     const cost = l.cost == null ? "—" : fmtCost(l.cost);
+    const prof = (l.profile && l.profile !== l.reqModel) ? `<span class="hint">${esc(l.profile)}</span>` : "–";
     return `<tr>
-      <td>${t}</td><td>${esc(l.reqModel || "–")}</td><td>${esc(l.model || "(nessuno)")}</td>
+      <td>${t}</td><td>${esc(l.reqModel || "–")}</td><td>${prof}</td><td>${esc(l.model || "(nessuno)")}</td>
       <td>${esc(l.proto || "")}</td><td>${l.latencyMs || 0}</td><td>${l.ttftMs == null ? "—" : l.ttftMs}</td>
       <td>${l.totalTok || 0}</td><td>${cost}</td><td>${status}</td>
     </tr>`;
@@ -801,13 +809,34 @@ document.getElementById("srv_add").onclick = async () => {
   renderServers();
   toast("Server aggiunto — riavvia l'app per attivarlo");
 };
-// Preset tool: crea un server dedicato preconfigurato
-document.querySelectorAll("button[data-preset]").forEach(b => b.onclick = async () => {
-  const preset = b.dataset.preset;
-  await api("/hub/servers", "POST", { action: "preset", preset });
-  renderServers();
-  toast("Preset '" + preset + "' aggiunto — riavvia l'app per attivarlo");
-});
+// Guida configurazione tool: mostra cosa incollare nei rispettivi tool
+function renderToolGuide() {
+  const el = document.getElementById("toolGuide");
+  if (!el) return;
+  const base = "http://127.0.0.1";  // le porte sono quelle dei preset
+  const guide = [
+    ["Trae (IDE)", `${base}:8791/v1`, "ModelHub", "modelhub", "auto, auto-code, auto-reasoning, auto-fast, free-pool"],
+    ["OpenCode", `${base}:8792/v1`, "ModelHub", "modelhub", "auto, auto-code, ..."],
+    ["Codex (CLI)", `${base}:8793/v1`, "ModelHub", "modelhub", "auto"],
+    ["Kodu AI", `${base}:8794/v1`, "ModelHub", "modelhub", "auto"],
+    ["TalkCody", `${base}:8795/v1`, "ModelHub", "modelhub", "auto-code"],
+    ["Claude Code", `ANTHROPIC_BASE_URL=${base}:8796`, "ModelHub", "modelhub", "/v1/messages (Anthropic)"],
+    ["Ollama-like", `${base}:11434`, "ModelHub", "modelhub", "/api/tags, /api/show"]
+  ];
+  el.innerHTML = guide.map(([tool, url, key, ak, models]) => `
+    <div style="margin-bottom:8px">
+      <b>${tool}</b><br>
+      Base URL: <code>${esc(url)}</code> · API Key: <code>${ak}</code><br>
+      Model: <code>${esc(models)}</code>
+      <button class="btn" style="font-size:11px;padding:2px 6px" data-copy="${esc(url + "||" + ak + "||" + models)}">copia</button>
+    </div>`).join("");
+  el.querySelectorAll("button[data-copy]").forEach(b => b.onclick = () => {
+    const [u, k, m] = b.dataset.copy.split("||");
+    const text = `Base URL: ${u}\nAPI Key: ${k}\nModel: ${m}`;
+    navigator.clipboard.writeText(text).then(() => toast("Config copiata"), () => toast("Copia fallita"));
+  });
+}
+
 
 function esc(s) {
   return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
