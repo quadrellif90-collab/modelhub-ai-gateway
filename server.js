@@ -67,7 +67,7 @@ const SIGNUP_URLS = {
   xai: "https://console.x.ai",
   zai: "https://z.ai/manage-apikey/apikey-list"
 };
-const VERSION = "0.7.38";
+const VERSION = "0.7.39";
 let cacheOn = process.env.MODELHUB_CACHE !== "0";
 let autoProbeOn = AUTO_PROBE;
 const UA_HTTP = new http.Agent({ keepAlive: true, maxSockets: 64 });
@@ -488,6 +488,20 @@ function resolveProfile(requested, messages) {
   if (it.fast) return "auto-fast";
   return "auto";
 }
+// Estrae il contesto della richiesta per l'auto-destinazione (lunghezza prompt, codice, reasoning)
+function buildCtx(rawBody) {
+  let promptLen = 0, hasCode = false, hasReasoning = false;
+  try {
+    const b = JSON.parse(rawBody || "{}");
+    const msgs = Array.isArray(b.messages) ? b.messages : [];
+    const text = msgs.map(m => (typeof m.content === "string" ? m.content : JSON.stringify(m.content || ""))).join("\n");
+    promptLen = text.length;
+    const it = classifyPrompt(text, { messages: msgs });
+    hasCode = it.code;
+    hasReasoning = it.reasoning;
+  } catch {}
+  return { promptLen, hasCode, hasReasoning };
+}
 const ENHANCE_PLUGINS = {
   concise: { label: "Conciso", transform: (sys, user) => ({ system: (sys ? sys + "\n" : "") + "Rispondi in modo conciso e diretto.", user }) },
   english: { label: "Inglese", transform: (sys, user) => ({ system: (sys ? sys + "\n" : "") + "Respond in English.", user }) },
@@ -675,7 +689,7 @@ async function maybeEnhance(body, req) {
   const cfg = enhancerCfg();
   let em = null;
   try {
-    if (!cfg.enabled || !cfg.model) return;
+    if (!cfg.enabled) return;
     if (req && req.headers["x-modelhub-no-enhance"]) return;
     if (!body || !Array.isArray(body.messages)) return;
     if (body.tools || body.tool_choice || body.functions || body.function_call) return;
@@ -684,6 +698,15 @@ async function maybeEnhance(body, req) {
     if (!last || typeof last.content !== "string") return;
     const original = last.content.trim();
     if (original.length < 16 || original.length > cfg.maxChars) return;
+    // Profilo auto: enhancer "tutto di default" — plugin intelligenti per intent
+    let plugins = cfg.plugins;
+    if ((!plugins || !plugins.length) && body.model && String(body.model).startsWith("auto")) {
+      const it = classifyPrompt(original, { messages: msgs });
+      if (it.code) plugins = ["codepro"];
+      else if (it.reasoning) plugins = ["concise", "english"];
+      else if (it.fast) plugins = ["concise"];
+      else plugins = ["concise"];
+    }
     em = modelMap.get(cfg.model);
     if (!em || !em.enabled) {
       const altId = (getProfiles()["free-pool"] || []).find(id => {
@@ -693,7 +716,7 @@ async function maybeEnhance(body, req) {
       em = altId ? modelMap.get(altId) : null;
     }
     if (!em) return;
-    const hash = crypto.createHash("sha1").update(original).digest("hex");
+    const hash = crypto.createHash("sha1").update(original + "|" + (plugins || []).join(",")).digest("hex");
     const hit = enhanceCache.get(hash);
     let enhanced = hit && Date.now() - hit.ts < 3600000 ? hit.enhanced : null;
     if (!enhanced) {
@@ -741,8 +764,34 @@ function selectCandidates(modelId, profile) {
     const m = modelMap.get(id);
     return m && m.enabled && isChatModel(id) && (!m.failUntil || m.failUntil <= now);
   });
-  const pool = applyStrategy(healthy.length ? healthy : order.filter(id => { const m = modelMap.get(id); return m && m.enabled && isChatModel(id); }), strategyFor(profile));
+  let pool = applyStrategy(healthy.length ? healthy : order.filter(id => { const m = modelMap.get(id); return m && m.enabled && isChatModel(id); }), strategyFor(profile));
+  // Profilo auto: auto-destinazione per contesto (lunghezza prompt, codice, complessità)
+  if (profile === "auto" && _activeReq && _activeReq.__ctx) {
+    const ctx = _activeReq.__ctx;
+    pool = pool.slice().sort((a, b) => autoDestScore(a, ctx) - autoDestScore(b, ctx));
+  }
   return pool;
+}
+
+// Punteggio per auto-destinazione: combina affidabilità (autorouteScore) con
+// adeguatezza al contesto (context length vs lunghezza prompt, capability richiesta).
+function autoDestScore(id, ctx) {
+  const m = modelMap.get(id);
+  if (!m) return -1e9;
+  let s = autorouteScore(id);
+  const ctxLen = m.contextLength || 0;
+  // Prompt lungo -> preferisci modelli con context length adeguato
+  if (ctx.promptLen > 2000 && ctxLen) {
+    if (ctxLen >= ctx.promptLen * 1.5) s += 300;
+    else if (ctxLen < ctx.promptLen) s -= 400;
+  }
+  // Codice -> preferisci modelli code-capable (presenti in auto-code)
+  if (ctx.hasCode && classify(id).code) s += 250;
+  // Reasoning -> preferisci modelli reasoning
+  if (ctx.hasReasoning && classify(id).reasoning) s += 250;
+  // Prompt molto breve -> preferisci modelli veloci/economici
+  if (ctx.promptLen < 60 && m.free) s += 120;
+  return s;
 }
 
 function parseRetryAfter(upRes, body) {
@@ -1906,6 +1955,7 @@ async function mainHandler(req, res) {
     if (req.method === "POST" && url === "/v1/messages") {
       let body = "";
       for await (const c of req) body += c;
+      _activeReq.__ctx = buildCtx(body);
       let ab;
       try { ab = JSON.parse(body); } catch { res.writeHead(400); return res.end("bad json"); }
       if (!ab || !ab.model) { res.writeHead(400); return res.end("missing model"); }
@@ -1958,6 +2008,7 @@ async function mainHandler(req, res) {
     if (req.method === "POST" && url.includes("chat/completions")) {
       let body = "";
       for await (const c of req) body += c;
+      _activeReq.__ctx = buildCtx(body);
       try { parsedChat = JSON.parse(body); } catch { res.writeHead(400); return res.end("bad json"); }
       if (!parsedChat || !parsedChat.model) { res.writeHead(400); return res.end("missing model"); }
     }
