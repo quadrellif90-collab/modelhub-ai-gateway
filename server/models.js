@@ -1,9 +1,11 @@
 // Model classification (pure functions, no global state)
 
 function classify(id) {
-  const reasoning = /reason|r1|reasoner|thinking|\bo[13]\b|-o1-|qwq|nemotron-3-ultra|deepseek-v3|qwen-3-32b|glm-4-5/i.test(id);
-  const code = /cod(e|ing|er)|devstral|starcoder|deepseek-v3|glm-4-5|kimi-k2|minimax-m2|qwen-?2?\.?5?-?coder|qwen3-coder/i.test(id);
-  const fast = /8b|flash-lite|mini|turbo|small|lightning|nano|instant|1\.5-flash|70b-instruct|8b-instruct|qwen-turbo|solar-mini|gemma2|ministral|llama3\.1-8b/i.test(id);
+  // Mirato: solo modelli VERAMENTE reasoning/coding/fast, niente falsi positivi di
+  // sottostringhe (es. "minimax-m2" o "kimi-k2" non sono coding, "deepseek-v3" no, ecc).
+  const reasoning = /\b(r1|reason(er|ing)?|thinking|o1|o3|o4|-o1-|qwq|qwen-?3-32b|nemotron-3-ultra|glm-4-5|deepseek-r1|deepseek-v3\.1-terminus|kimi-k2-thinking|kimi-k2\.5|kimi-k2\.6|kimi-k2\.7|qwen-?3-?max-thinking|arcee.*trinity|inkling|nex-n2)\b/i.test(id);
+  const code = /\b(cod(e|ing|er)|devstral|starcoder|codestral|coder|codex|kat-coder|seed-2\.0-code|seed-2\.1-code|poolside\/laguna|qwen3?-?coder|qwen-?2\.5-coder|glm-.*code|kimi.*-?code|hermes-4|doubao-seed-2\.0-code|hy3|llama-4-scout|llama-4-maverick)\b/i.test(id);
+  const fast = /\b(8b|flash-lite|flash-lite|mini|turbo|small|lightning|nano|instant|1\.5-flash|70b-instruct|8b-instruct|qwen-turbo|solar-mini|gemma|ministral|llama-?3\.1-8b|llama-?3\.2-3b|llama-?3\.3-8b|hunyuan-a13b)\b/i.test(id);
   return { reasoning, code, fast };
 }
 

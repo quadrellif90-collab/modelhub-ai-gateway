@@ -66,7 +66,8 @@ function req(method, urlPath, body) {
   ok("auto-reasoning e' sottoinsieme di auto", areason.length < auto.length);
   ok("auto-code != auto (ordinamenti diversi)", JSON.stringify(auto) !== JSON.stringify(acode));
   ok("free-pool sono tutti free", freepool.every(id => { const mm = st.models.find(x => x.id === id); return mm && mm.isFree; }));
-  ok("auto-code sono tutti code", acode.every(id => /cod(e|ing|er)|devstral|starcoder|deepseek-v3|glm-4-5|kimi-k2|minimax-m2|qwen.*coder/i.test(id)));
+  const { classify } = require("../server/models.js");
+  ok("auto-code sono tutti code (classify)", acode.every(id => classify(id).code));
 
   console.log("\n[3] Cambio profilo via API (reorder) persistito");
   const before = (await req("GET", "/hub/state")).body.profileOrder["auto"];

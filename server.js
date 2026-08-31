@@ -67,7 +67,7 @@ const SIGNUP_URLS = {
   xai: "https://console.x.ai",
   zai: "https://z.ai/manage-apikey/apikey-list"
 };
-const VERSION = "0.7.25";
+const VERSION = "0.7.28";
 let cacheOn = process.env.MODELHUB_CACHE !== "0";
 let autoProbeOn = AUTO_PROBE;
 const UA_HTTP = new http.Agent({ keepAlive: true, maxSockets: 64 });
@@ -405,16 +405,19 @@ function rebuildProfiles() {
   const codeIds = scored.filter(id => classify(id).code);
   const reasoningIds = scored.filter(id => classify(id).reasoning);
   const fastIds = scored.filter(id => classify(id).fast);
-  const defaultMerge = (prof, generated, strict) => {
-    const arr = prefs.profiles[prof];
-    const base = (Array.isArray(arr) && arr.length) ? arr : generated;
+  const defaultMerge = (prof, generated, strict, forceRegen) => {
+    // forceRegen=true: ignora l'array persistito, rigenera SEMPRE dalla categoria.
+    const base = forceRegen ? generated : (Array.isArray(prefs.profiles[prof]) && prefs.profiles[prof].length ? prefs.profiles[prof] : generated);
     prefs.profiles[prof] = mergedOrder(base, generated, enabledSet, strict);
   };
   defaultMerge("auto", scored, false);
-  defaultMerge("auto-code", codeIds, true);
-  defaultMerge("auto-reasoning", reasoningIds, true);
-  defaultMerge("auto-fast", fastIds, true);
-  defaultMerge("free-pool", buildFreePool(), true);
+  // I pool specializzati sono SEMPRE rigenerati dalla categoria corrente: non riusare
+  // gli array persistiti in prefs.json (altrimenti una vecchia classifica rimane "incollata"
+  // e auto-code/auto-reasoning restano alias del pool intero dopo una correzione di classify()).
+  defaultMerge("auto-code", codeIds, true, true);
+  defaultMerge("auto-reasoning", reasoningIds, true, true);
+  defaultMerge("auto-fast", fastIds, true, true);
+  defaultMerge("free-pool", buildFreePool(), true, true);
   for (const prof of Object.keys(prefs.profiles)) {
     if (["auto", "auto-code", "auto-reasoning", "auto-fast", "free-pool"].includes(prof)) continue;
     const arr = prefs.profiles[prof];
