@@ -144,6 +144,10 @@
         autoExcludeNonFree: $("mfAutoExclude").checked,
         dailyLimit: Number($("dailyLimit").value) || 0,
       }));
+      const portVal = Number($("port").value);
+      if (Number.isFinite(portVal) && portVal >= 1024 && portVal <= 65535) {
+        results.push(await api("/hub/port", "POST", { port: portVal }));
+      }
       try { localStorage.setItem("mh-theme", $("themeLight").checked ? "light" : "dark"); } catch {}
       const failed = results.filter(r => !r.ok);
       if (failed.length) {

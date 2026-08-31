@@ -18,7 +18,7 @@ const metricsLib = require("./server/metrics.js");
 const keysLib = require("./server/keys.js");
 const semCacheLib = require("./server/semcache.js");
 
-const PORT = parseInt(process.env.MODELHUB_PORT || "8787", 10);
+let PORT = parseInt(process.env.MODELHUB_PORT || "8787", 10);
 const DIR = process.env.MODELHUB_DIR || __dirname;
 const CONFIG_FILE = path.join(DIR, "config.json");
 const AUTH_FILE = path.join(DIR, "auth.json");
@@ -67,7 +67,7 @@ const SIGNUP_URLS = {
   xai: "https://console.x.ai",
   zai: "https://z.ai/manage-apikey/apikey-list"
 };
-const VERSION = "0.7.39";
+const VERSION = "0.7.40";
 let cacheOn = process.env.MODELHUB_CACHE !== "0";
 let autoProbeOn = AUTO_PROBE;
 const UA_HTTP = new http.Agent({ keepAlive: true, maxSockets: 64 });
@@ -145,6 +145,12 @@ if (!config.port) config.port = PORT;
 
 let auth = readAuth();
 let prefs = readJSON(PREFS_FILE, {});
+// Porta principale: se l'utente l'ha cambiata nelle impostazioni (prefs.port),
+// l'hub si apre lì al riavvio. Ha la precedenza su 8787 ma non su MODELHUB_PORT (env).
+if (prefs && prefs.port && Number.isFinite(Number(prefs.port)) && Number(prefs.port) >= 1024 && Number(prefs.port) <= 65535) {
+  PORT = Number(prefs.port);
+}
+config.port = PORT;
 if (!prefs.enabled) prefs.enabled = {};
 if (!prefs.profiles) prefs.profiles = {};
 if (!prefs.strategy || typeof prefs.strategy !== "object") prefs.strategy = {};
@@ -1589,6 +1595,13 @@ async function handleControl(req, res, url) {
     }
     writeJSON(PREFS_FILE, prefs, log);
     return sendJSON(res, 200, { ok: true, servers: prefs.servers });
+  }
+  if (url === "/hub/port" && req.method === "POST") {
+    const p = Number(body && body.port);
+    if (!Number.isFinite(p) || p < 1024 || p > 65535) return sendJSON(res, 400, { ok: false, error: "porta non valida (1024-65535)" });
+    prefs.port = p;
+    writeJSON(PREFS_FILE, prefs, log);
+    return sendJSON(res, 200, { ok: true, port: p, note: "Riavvia l'app per applicare la nuova porta principale" });
   }
   if (url === "/hub/keys" && body.provider) {
     const key = body.key || "";
