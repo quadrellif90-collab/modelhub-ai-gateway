@@ -67,7 +67,7 @@ const SIGNUP_URLS = {
   xai: "https://console.x.ai",
   zai: "https://z.ai/manage-apikey/apikey-list"
 };
-const VERSION = "0.7.28";
+const VERSION = "0.7.29";
 let cacheOn = process.env.MODELHUB_CACHE !== "0";
 let autoProbeOn = AUTO_PROBE;
 const UA_HTTP = new http.Agent({ keepAlive: true, maxSockets: 64 });
@@ -640,7 +640,8 @@ function featuresCfg() {
     cache: typeof f.cache === "boolean" ? f.cache : cacheOn,
     autoProbe: typeof f.autoProbe === "boolean" ? f.autoProbe : autoProbeOn,
     smartFallback: !!f.smartFallback,
-    startMinimized: !!f.startMinimized
+    startMinimized: !!f.startMinimized,
+    autoStart: !!f.autoStart
   };
 }
 function enhancerCfg() {
@@ -1406,6 +1407,7 @@ async function handleControl(req, res, url) {
     if (typeof body.autoProbe === "boolean") { f.autoProbe = body.autoProbe; autoProbeOn = body.autoProbe; }
     if (typeof body.smartFallback === "boolean") f.smartFallback = body.smartFallback;
     if (typeof body.startMinimized === "boolean") f.startMinimized = body.startMinimized;
+    if (typeof body.autoStart === "boolean") { f.autoStart = body.autoStart; try { if (typeof global.__setAutoStart === "function") global.__setAutoStart(body.autoStart); } catch {} }
     writeJSON(PREFS_FILE, prefs, log);
     return sendJSON(res, 200, { ok: true, features: featuresCfg() });
   }

@@ -121,6 +121,7 @@ function quitApp() {
 function setAutoStart(on) {
   app.setLoginItemSettings({ openAtLogin: on, path: process.execPath, args: [app.getAppPath()] });
 }
+global.__setAutoStart = setAutoStart; // esposto per server.js (POST /hub/features autoStart)
 
 function setupAutoUpdate() {
   if (!app.isPackaged) return;
@@ -205,7 +206,8 @@ if (!gotLock) { app.quit(); }
 app.on("second-instance", () => showWindow());
 
 app.whenReady().then(() => {
-  try { if (!app.getLoginItemSettings().openAtLogin) setAutoStart(true); } catch {}
+  // NOTA: non forziamo setAutoStart(true) qui: rispettiamo la scelta dell'utente
+  // (la checkbox "Avvio automatico" nella tray gestisce la preferenza).
   const launchedAtLogin = app.getLoginItemSettings().wasOpenedAtLogin;
   startServer();
   createWindow();

@@ -125,6 +125,7 @@
       const pt = $("port"); if (pt) pt.value = (j.port || 8787);
       try { set("themeLight", localStorage.getItem("mh-theme") === "light"); } catch {}
       try { set("startMin", !!(j.features && j.features.startMinimized)); } catch {}
+      try { set("autoStart", !!j.features.autoStart); } catch {}
     }
 
     async function save() {
@@ -134,6 +135,7 @@
         autoProbe: $("featProbe").checked,
         smartFallback: $("featFallback").checked,
         startMinimized: $("startMin").checked,
+        autoStart: $("autoStart").checked,
       };
       results.push(await api("/hub/features", "POST", f));
       results.push(await api("/hub/model-filter", "POST", {

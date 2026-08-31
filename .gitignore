@@ -9,5 +9,9 @@ prefs.local.json
 modelhub-export-*.json
 .DS_Store
 Thumbs.db
-*.log.jsonl
 requests.log.*
+# Strumenti/backup pericolosi o spuri (non devono finire su GitHub)
+decrypt-auth.js
+*.backup.*.js
+*.backup.*/
+test/tmp_chk/

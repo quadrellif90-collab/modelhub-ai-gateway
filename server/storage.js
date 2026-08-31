@@ -13,7 +13,9 @@ function readJSON(file, fallback) {
 
 function writeJSON(file, obj, logFn) {
   try {
-    fs.writeFileSync(file, JSON.stringify(obj, null, 2));
+    const tmp = file + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(obj, null, 2));
+    fs.renameSync(tmp, file); // rinomina atomica: evita prefs.json corrotto a metà scrittura
   } catch (e) {
     if (logFn) logFn("write err " + file + ": " + e.message);
   }
