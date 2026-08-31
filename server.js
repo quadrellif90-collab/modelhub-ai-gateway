@@ -70,7 +70,7 @@ const SIGNUP_URLS = {
   xai: "https://console.x.ai",
   zai: "https://z.ai/manage-apikey/apikey-list"
 };
-const VERSION = "0.7.43";
+const VERSION = "0.7.44";
 let cacheOn = process.env.MODELHUB_CACHE !== "0";
 let autoProbeOn = AUTO_PROBE;
 const UA_HTTP = new http.Agent({ keepAlive: true, maxSockets: 64 });
@@ -684,10 +684,12 @@ function featuresCfg() {
     autoStart: !!f.autoStart
   };
 }
+// enhancer disabilitato di default perché i modelli free spesso falliscono o variano
+// a causa di limiti quota/rate. L'utente può riabilitarlo se preferisce.
 function enhancerCfg() {
   const e = prefs.enhancer || {};
   return {
-    enabled: typeof e.enabled === "boolean" ? e.enabled : process.env.MODELHUB_ENHANCE !== "0",
+    enabled: false,
     model: modelMap.has(e.model) ? e.model : null,
     maxChars: e.maxChars || 4000,
     timeoutMs: e.timeoutMs || 12000,
@@ -1580,17 +1582,16 @@ async function handleControl(req, res, url) {
     } else if (body.action === "preset" && body.preset) {
       // Server dedicati preconfigurati per i tool più comuni
       const PRESETS = {
-             trae: { name: "trae", label: "Trae (IDE agent)", port: 8791, profile: "auto", basePath: "/v1" },
-             opencode: { name: "opencode", label: "OpenCode", port: 8792, profile: "auto", basePath: "/v1" },
-             codex: { name: "codex", label: "OpenAI Codex CLI", port: 8793, profile: "auto", basePath: "/v1" },
-             kodu: { name: "kodu", label: "Kodu AI", port: 8794, profile: "auto", basePath: "/v1" },
-             talkcody: { name: "talkcody", label: "TalkCody", port: 8795, profile: "auto-code", basePath: "/v1" },
-             ollama: { name: "ollama", label: "Ollama-compatible", port: 11434, profile: "", basePath: "/api" },
-             claude: { name: "claude", label: "Claude Code (via /v1)", port: 8796, profile: "auto", basePath: "/v1" },
-                     puter-glm: { name: "puter-glm", label: "Puter GLM (free unlimited)", port: 8797, profile: "auto", basePath: "/v1" },
-                     claude-messages: { name: "claude-messages", label: "Anthropic /v1/messages", port: 8796, profile: "auto", basePath: "/v1/messages" },
-                   };
-           };
+        trae: { name: "trae", label: "Trae (IDE agent)", port: 8791, profile: "auto", basePath: "/v1" },
+        opencode: { name: "opencode", label: "OpenCode", port: 8792, profile: "auto", basePath: "/v1" },
+        codex: { name: "codex", label: "OpenAI Codex CLI", port: 8793, profile: "auto", basePath: "/v1" },
+        kodu: { name: "kodu", label: "Kodu AI", port: 8794, profile: "auto", basePath: "/v1" },
+        talkcody: { name: "talkcody", label: "TalkCody", port: 8795, profile: "auto-code", basePath: "/v1" },
+        ollama: { name: "ollama", label: "Ollama-compatible", port: 11434, profile: "", basePath: "/api" },
+        claude: { name: "claude", label: "Claude Code (via /v1)", port: 8796, profile: "auto", basePath: "/v1" },
+        "puter-glm": { name: "puter-glm", label: "Puter GLM (free unlimited)", port: 8797, profile: "auto", basePath: "/v1" },
+        "claude-messages": { name: "claude-messages", label: "Anthropic /v1/messages", port: 8796, profile: "auto", basePath: "/v1/messages" }
+      };
       const p = PRESETS[body.preset];
       if (!p) return sendJSON(res, 400, { ok: false, error: "preset sconosciuto" });
       if (prefs.servers.some(s => s.port === p.port)) return sendJSON(res, 400, { ok: false, error: "porta " + p.port + " già usata" });
