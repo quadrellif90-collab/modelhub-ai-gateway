@@ -35,6 +35,9 @@ const CACHE_TTL_MS = parseInt(process.env.MODELHUB_CACHE_TTL || "600000", 10);
 const CACHE_MAX = parseInt(process.env.MODELHUB_CACHE_MAX || "200", 10);
 const UPSTREAM_TIMEOUT_MS = parseInt(process.env.MODELHUB_UPSTREAM_TIMEOUT || "15000", 10);
 const UPSTREAM_TIMEOUT_NONSTREAM_MS = parseInt(process.env.MODELHUB_UPSTREAM_TIMEOUT_NONSTREAM || "30000", 10);
+// Se un candidato non emette il primo token entro questo tempo, il failover
+// lo abbandona e passa al successivo (evita "failover timeout" su modelli free lenti/morti).
+const TTFT_GIVEUP_MS = parseInt(process.env.MODELHUB_TTFT_GIVEUP || "20000", 10);
 const STRATEGIES = ["order", "autoroute", "cheapest", "fastest", "least-used", "random", "cascade"];
 const SIGNUP_URLS = {
   upstage: "https://console.upstage.ai/keys",
@@ -1315,7 +1318,7 @@ function settingsCfg() {
     streamCapPerProvider: STREAM_CAP_PER_PROVIDER,
     verifyMs: num("MODELHUB_VERIFY_MS", "verifyMs", 900000),
     verifyTopK: num("MODELHUB_VERIFY_TOPK", "verifyTopK", 6),
-    failoverMs: num("MODELHUB_FAILOVER_MS", "failoverMs", 45000),
+    failoverMs: num("MODELHUB_FAILOVER_MS", "failoverMs", 90000),
     cacheTtlMs: num("MODELHUB_CACHE_TTL", "cacheTtlMs", 600000),
     tokenSet: !!(process.env.MODELHUB_TOKEN || prefs.controlToken)
   };
@@ -2079,7 +2082,7 @@ async function mainHandler(req, res) {
         if (peekM && !streamSlotFree(peekM.provider)) { setTimeout(attempt, 250); return; }
         const id = candidates.shift();
         const m = modelMap.get(id);
-        if (!m || !m.enabled) { attempt(); return; }
+        if (!m || !m.enabled || (m.failUntil && m.failUntil > Date.now())) { attempt(); return; }
         streamSlotTake(m.provider);
         let srel = false;
         const giveOnce = () => { if (!srel) { srel = true; streamSlotGive(m.provider); } };
@@ -2092,6 +2095,8 @@ async function mainHandler(req, res) {
         let u;
         try { u = new URL(m.baseURL); } catch { markFail(m, "bad url"); attempt(); return; }
         const transport = u.protocol === "https:" ? https : http;
+        let firstTokenSeen = false;
+        let ttftWatch = null;
         const req = transport.request({
           agent: upstreamAgent(u),
           method: "POST",
@@ -2157,6 +2162,8 @@ async function mainHandler(req, res) {
             if (!clientStarted) {
               clientStarted = true;
               firstAt = Date.now();
+              firstTokenSeen = true;
+              if (ttftWatch) { try { clearTimeout(ttftWatch); } catch {} }
               const ttft = firstAt - t0;
               m.lastTTFTMs = ttft;
               m.avgTTFTMs = m.avgTTFTMs ? Math.round((m.avgTTFTMs * 3 + ttft) / 4) : ttft;
@@ -2181,6 +2188,14 @@ async function mainHandler(req, res) {
           pt.on("close", () => { giveOnce(); if (!stale() && clientStarted && !chainClosed) safeEnd(); });
           return;
         });
+        ttftWatch = setTimeout(() => {
+          if (firstTokenSeen || clientStarted || chainClosed || stale()) return;
+          try { req.destroy(); } catch {}
+          giveOnce();
+          markFail(m, "ttft timeout", null);
+          recordRequest({ proto: "stream:openai", reqModel: parsed.model, model: id, ok: false, error: "ttft timeout", latencyMs: Date.now() - t0, ttftMs: null, promptTok: 0, completionTok: 0, totalTok: 0, cost: 0, cached: false });
+          attempt();
+        }, TTFT_GIVEUP_MS);
         req.on("error", (e) => {
           giveOnce();
           if (stale()) return;
