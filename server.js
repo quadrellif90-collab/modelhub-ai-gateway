@@ -70,7 +70,7 @@ const SIGNUP_URLS = {
   xai: "https://console.x.ai",
   zai: "https://z.ai/manage-apikey/apikey-list"
 };
-const VERSION = "0.7.45";
+const VERSION = "0.7.46";
 let cacheOn = process.env.MODELHUB_CACHE !== "0";
 let autoProbeOn = AUTO_PROBE;
 const UA_HTTP = new http.Agent({ keepAlive: true, maxSockets: 64 });
@@ -769,7 +769,8 @@ function selectCandidates(modelId, profile) {
   if (modelId && modelMap.has(modelId) && modelMap.get(modelId).enabled) return [modelId];
   const stripped = modelId && modelId.includes("/") ? modelId.slice(modelId.indexOf("/") + 1) : modelId;
   if (stripped && modelMap.has(stripped) && modelMap.get(stripped).enabled) return [stripped];
-  const order = maybeExperiment(profile, getProfiles()[profile] || getProfiles().auto || []);
+  const profileOrder = getProfiles()[profile];
+  const order = maybeExperiment(profile, (profileOrder && profileOrder.length ? profileOrder : (getProfiles().auto || [])));
   const now = Date.now();
   const healthy = order.filter(id => {
     const m = modelMap.get(id);
@@ -905,7 +906,7 @@ async function semEmbed(text) {
 
 // ---------------------------------------------------------------------------
 async function postWithFailover(openaiBody, key) {
-  const profile = resolveProfile(_activeReq.__fixedProfile || openaiBody.model, openaiBody.messages);
+  const profile = resolveProfile((_activeReq && _activeReq.__fixedProfile) || openaiBody.model, openaiBody.messages);
   openaiBody.__profile = profile;
   const strategy = strategyFor(profile);
   const tried = [];
@@ -1052,7 +1053,7 @@ const translators = {
 
 function streamWithFailover(openaiBody, res, protocol) {
   return new Promise((resolve) => {
-    const profile = resolveProfile(_activeReq.__fixedProfile || openaiBody.model, openaiBody.messages);
+    const profile = resolveProfile((_activeReq && _activeReq.__fixedProfile) || openaiBody.model, openaiBody.messages);
     openaiBody.__profile = profile;
     const candidates = selectCandidates(openaiBody.model, profile);
     const translator = translators[protocol];
@@ -2628,5 +2629,6 @@ module.exports = {
     if (state.prefs) prefs = state.prefs;
     if (state.config) config = state.config;
     if (state.pricing) pricing = state.pricing;
+    if (state.models || state.prefs) rebuildProfiles();
   }
 };

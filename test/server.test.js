@@ -18,7 +18,8 @@ describe("escCh", () => {
 
 describe("classify", () => {
   test("detects reasoning models", () => {
-    assert.strictEqual(mh.classify("x/deepseek-v3").reasoning, true);
+    assert.strictEqual(mh.classify("x/deepseek-r1").reasoning, true);
+    assert.strictEqual(mh.classify("x/deepseek-v3").reasoning, false);
     assert.strictEqual(mh.classify("x/qwen-reasoner").reasoning, true);
     assert.strictEqual(mh.classify("x/llama-8b-instruct").reasoning, false);
   });
