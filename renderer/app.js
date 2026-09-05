@@ -13,6 +13,9 @@ const STRATEGIES = [
 let STATE = null;
 let selectedProfile = "auto";
 let profileOrder = [];
+let pollInterval = 5000;
+let lastPollOk = true;
+let pollTimer = null;
 const UI = Object.assign(
   { collapsed: {}, search: "", filter: "all", sort: "default" },
   (() => { try { return JSON.parse(localStorage.getItem("mh-ui") || "{}"); } catch { return {}; } })()
@@ -44,9 +47,14 @@ async function poll() {
       renderLogs(l.logs || []);
       updateLastModel(l.logs || []);
     }
+    lastPollOk = true;
+    if (!up) pollInterval = 60000;
+    else pollInterval = 30000;
   } catch {
     document.getElementById("serverDot").className = "dot off";
     document.getElementById("serverText").textContent = "server offline";
+    lastPollOk = false;
+    pollInterval = 10000;
   }
 }
 
@@ -925,4 +933,24 @@ if (typeof window.renderProviders === "function") window.renderProviders = rende
   apply(saved);
 })();
 
-setInterval(poll, 3000);
+function applyPollInterval() {
+  clearInterval(pollTimer);
+  pollTimer = setInterval(poll, pollInterval);
+}
+
+pollTimer = setInterval(poll, pollInterval);
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) pollInterval = 30000;
+  else pollInterval = 5000;
+  applyPollInterval();
+});
+
+window.addEventListener("online", () => {
+  pollInterval = 5000;
+  applyPollInterval();
+});
+window.addEventListener("offline", () => {
+  pollInterval = 60000;
+  applyPollInterval();
+});

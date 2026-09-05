@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, nativeImage, shell } = require("electron");
+﻿const { app, BrowserWindow, Tray, Menu, nativeImage, shell } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 
@@ -16,6 +16,18 @@ function getDataDir() {
 }
 const DATA_DIR = getDataDir();
 try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
+try {
+  const backupDir = path.join(DATA_DIR, "backup");
+  const files = fs.readdirSync(DATA_DIR);
+  const backups = files.filter(f => /^auth\.backup\..+\.json$/.test(f));
+  if (backups.length) {
+    try { fs.mkdirSync(backupDir, { recursive: true }); } catch {}
+    for (const f of backups) {
+      try { fs.renameSync(path.join(DATA_DIR, f), path.join(backupDir, f)); } catch {}
+    }
+    console.log(`modelhub: moved ${backups.length} auth.backup.*.json file(s) to ${backupDir}`);
+  }
+} catch {}
 
 const PREFS_PATH = path.join(DATA_DIR, "prefs.json");
 let prefs = {};
@@ -54,12 +66,13 @@ let win = null;
 let tray = null;
 let widget = null;
 let isQuitting = false;
+let hub = null;
 
 function startServer() {
   try {
     // I moduli dell'app (server.js + server/*) stanno in __dirname (cartella
-    // dell'app), NON in MODELHUB_DIR (che è la cartella dati utente).
-    const hub = require(path.join(__dirname, "server.js"));
+    // dell'app), NON in MODELHUB_DIR (che Ã¨ la cartella dati utente).
+    hub = require(path.join(__dirname, "server.js"));
     if (typeof hub.startHub === "function") hub.startHub();
   } catch (e) {
     console.error("hub start failed:", e);
@@ -82,7 +95,7 @@ function createSettingsWindow() {
   if (settingsWin) { settingsWin.show(); settingsWin.focus(); return; }
   settingsWin = new BrowserWindow({
     width: 560, height: 720, show: true, frame: true,
-    resizable: true, icon: ICON, title: "ModelHub — Impostazioni",
+    resizable: true, icon: ICON, title: "ModelHub â€” Impostazioni",
     webPreferences: { nodeIntegration: false, contextIsolation: true }
   });
   settingsWin.loadFile(path.join(DIR, "renderer", "settings.html"), CTRL_TOKEN ? { query: { t: CTRL_TOKEN } } : undefined);
@@ -115,6 +128,7 @@ function quitApp() {
   isQuitting = true;
   if (widget) { widget.destroy(); widget = null; }
   if (tray) { tray.destroy(); tray = null; }
+  if (hub && typeof hub.cleanup === "function") hub.cleanup();
   app.quit();
 }
 
@@ -170,7 +184,7 @@ function createWindow() {
     }
     return { action: "deny" };
   });
-  // Avvio ridotto: se startMinimized è true, parte solo in tray (ready-to-show lo gestisce)
+  // Avvio ridotto: se startMinimized Ã¨ true, parte solo in tray (ready-to-show lo gestisce)
   win.on("close", (e) => {
     if (isQuitting) return;
     e.preventDefault();

@@ -1,0 +1,34 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Server (Node.js)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/server.js",
+      "runtimeArgs": ["--inspect"],
+      "port": 9229,
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen"
+    },
+    {
+      "name": "Debug Electron Main",
+      "type": "electron",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.js",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["start"],
+      "windows": {
+        "runtimeExecutable": "npm.cmd"
+      }
+    },
+    {
+      "name": "Attach to Electron",
+      "type": "node",
+      "request": "attach",
+      "port": 9229,
+      "attachTo": "localhost:9229",
+      "restart": true
+    }
+  ]
+}

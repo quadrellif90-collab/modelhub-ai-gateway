@@ -321,10 +321,10 @@ function today() {
 }
 
 function rebuildModels() {
-  const list = [];
   const mfilter = prefs.modelFilter || {};
   const blacklist = new Set(mfilter.blacklist || []);
   const whitelist = new Set(mfilter.whitelist || []);
+  const seen = new Map();
   for (const p of config.providers) {
     const key = resolveKey(p.authId);
     const keyOk = !p.needsKey || !!key;
@@ -351,7 +351,7 @@ function rebuildModels() {
       if (mfilter.freeProvidersOnly && !isFree) continue;
       // whitelist mode: se whitelist non vuota, mostra solo i modelli in essa
       if (whitelist.size > 0 && !whitelist.has(id)) continue;
-      list.push({
+      const entry = {
         id, provider: p.name, label: p.label || p.name, name: m.name,
         baseURL: p.baseURL, authId: p.authId, needsKey: !!p.needsKey,
         free: prev ? prev.free : isFree,
@@ -366,11 +366,28 @@ function rebuildModels() {
         cost: prev ? prev.cost || 0 : 0, dailyCost: prev ? prev.dailyCost || 0 : 0,
         lifetimeFails: prev ? prev.lifetimeFails || 0 : 0,
         lastTTFTMs: prev ? prev.lastTTFTMs || 0 : 0, avgTTFTMs: prev ? prev.avgTTFTMs || 0 : 0
-      });
+      };
+      if (seen.has(id)) {
+        const existing = seen.get(id);
+        existing.fails += entry.fails;
+        existing.requests += entry.requests;
+        existing.tokens += entry.tokens;
+        existing.cost += entry.cost;
+        existing.dailyReq += entry.dailyReq;
+        existing.dailyTok += entry.dailyTok;
+        existing.dailyCost += entry.dailyCost;
+        existing.lifetimeFails += entry.lifetimeFails;
+        if (!existing.lastError && entry.lastError) existing.lastError = entry.lastError;
+        if (!existing.lastLatencyMs && entry.lastLatencyMs) existing.lastLatencyMs = entry.lastLatencyMs;
+        if (!existing.lastTTFTMs && entry.lastTTFTMs) existing.lastTTFTMs = entry.lastTTFTMs;
+        if (!existing.avgTTFTMs && entry.avgTTFTMs) existing.avgTTFTMs = entry.avgTTFTMs;
+      } else {
+        seen.set(id, entry);
+      }
     }
   }
-  models = list;
-  modelMap = new Map(list.map(m => [m.id, m]));
+  models = Array.from(seen.values());
+  modelMap = new Map(models.map(m => [m.id, m]));
   rebuildProfiles();
   log(`rebuilt: ${models.length} models across ${config.providers.length} providers`);
 }
@@ -411,9 +428,9 @@ function mergedOrder(manualArr, generated, enabledSet, strict) {
 // (sono ricalcolati a ogni avvio), così prefs.json resta piccolo e veloce da scrivere.
 const GENERATED_PROFILES = ["auto", "auto-code", "auto-reasoning", "auto-fast", "free-pool"];
 let liveProfiles = {};
-// Riferimento alla richiesta attiva, così postWithFailover/streamWithFailover
-// (definiti fuori da mainHandler) possono leggere req.__fixedProfile.
-let _activeReq = null;
+// Mappa delle richieste attive per context-aware routing.
+const activeRequests = new Map();
+
 
 function rebuildProfiles() {
   const enabledIds = models.filter(m => m.enabled && isChatModel(m.id)).map(m => m.id);
@@ -541,6 +558,23 @@ function alertWebhook(url, event, payload) {
   if (!url) return;
   try {
     const u = new URL(url);
+    if (u.protocol !== "http:" && u.protocol !== "https:") {
+      log("alertWebhook blocked: unsupported protocol " + u.protocol);
+      return;
+    }
+    const hostname = u.hostname.replace(/^\[|\]$/g, "");
+    const isLocalhost = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+    const isMetadata = hostname === "169.254.169.254";
+    const parts = hostname.split(".").map(Number);
+    const isPrivate = parts.length === 4 && (
+      (parts[0] === 10) ||
+      (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
+      (parts[0] === 192 && parts[1] === 168)
+    );
+    if (isLocalhost || isMetadata || isPrivate) {
+      log("alertWebhook blocked: private/restricted host " + hostname);
+      return;
+    }
     const body = JSON.stringify({ event, ts: Date.now(), ...payload });
     const transport = u.protocol === "https:" ? https : http;
     const req = transport.request({
@@ -765,7 +799,7 @@ async function maybeEnhance(body, req) {
 }
 const { cascadeValid, deriveEndpoint } = routingLib;
 
-function selectCandidates(modelId, profile) {
+function selectCandidates(modelId, profile, req) {
   if (modelId && modelMap.has(modelId) && modelMap.get(modelId).enabled) return [modelId];
   const stripped = modelId && modelId.includes("/") ? modelId.slice(modelId.indexOf("/") + 1) : modelId;
   if (stripped && modelMap.has(stripped) && modelMap.get(stripped).enabled) return [stripped];
@@ -778,8 +812,8 @@ function selectCandidates(modelId, profile) {
   });
   let pool = applyStrategy(healthy.length ? healthy : order.filter(id => { const m = modelMap.get(id); return m && m.enabled && isChatModel(id); }), strategyFor(profile));
   // Profilo auto: auto-destinazione per contesto (lunghezza prompt, codice, complessità)
-  if (profile === "auto" && _activeReq && _activeReq.__ctx) {
-    const ctx = _activeReq.__ctx;
+  if (profile === "auto" && req && req.__ctx) {
+    const ctx = req.__ctx;
     pool = pool.slice().sort((a, b) => autoDestScore(a, ctx) - autoDestScore(b, ctx));
   }
   return pool;
@@ -905,8 +939,8 @@ async function semEmbed(text) {
 }
 
 // ---------------------------------------------------------------------------
-async function postWithFailover(openaiBody, key) {
-  const profile = resolveProfile((_activeReq && _activeReq.__fixedProfile) || openaiBody.model, openaiBody.messages);
+async function postWithFailover(openaiBody, key, req) {
+  const profile = resolveProfile((req && req.__fixedProfile) || openaiBody.model, openaiBody.messages);
   openaiBody.__profile = profile;
   const strategy = strategyFor(profile);
   const tried = [];
@@ -937,7 +971,7 @@ async function postWithFailover(openaiBody, key) {
     }
   }
 
-  const candidates = selectCandidates(openaiBody.model, profile);
+  const candidates = selectCandidates(openaiBody.model, profile, req);
   const chainStart = Date.now();
   const CHAIN_BUDGET = settingsCfg().failoverMs;
   let lastError = "all upstreams failed";
@@ -1051,11 +1085,11 @@ const translators = {
   ollama: () => makeOllamaTranslator()
 };
 
-function streamWithFailover(openaiBody, res, protocol) {
+function streamWithFailover(openaiBody, res, protocol, req) {
   return new Promise((resolve) => {
-    const profile = resolveProfile((_activeReq && _activeReq.__fixedProfile) || openaiBody.model, openaiBody.messages);
+    const profile = resolveProfile((req && req.__fixedProfile) || openaiBody.model, openaiBody.messages);
     openaiBody.__profile = profile;
-    const candidates = selectCandidates(openaiBody.model, profile);
+    const candidates = selectCandidates(openaiBody.model, profile, req);
     const translator = translators[protocol];
     const makeXlat = typeof translator === "function" ? translator : () => translator;
     const xlat = makeXlat(res);
@@ -1950,8 +1984,22 @@ function rotatedRequestLogPath() {
 }
 const CSP = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'";
 
+
+function checkDailyLimit(req, res) {
+  const mfilter = prefs.modelFilter || {};
+  const limit = mfilter.dailyLimit;
+  if (!limit || limit <= 0) return false;
+  const total = models.reduce((a, m) => a + (m.dailyReq || 0), 0);
+  if (total > limit) {
+    sendJSON(res, 429, { error: "daily limit exceeded" });
+    return true;
+  }
+  return false;
+}
+
 async function mainHandler(req, res) {
-  _activeReq = req;
+  const reqKey = req.socket.remotePort || req.headers['x-request-id'] || String(Date.now());
+  activeRequests.set(reqKey, req);
   const url = req.url.split("?")[0];
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-api-key, x-modelhub-token");
@@ -1988,9 +2036,10 @@ async function mainHandler(req, res) {
 
     // Anthropic Messages API (per claude-code e tool Anthropic)
     if (req.method === "POST" && url === "/v1/messages") {
+      if (checkDailyLimit(req, res)) return;
       let body = "";
       for await (const c of req) body += c;
-      _activeReq.__ctx = buildCtx(body);
+      req.__ctx = buildCtx(body);
       let ab;
       try { ab = JSON.parse(body); } catch { res.writeHead(400); return res.end("bad json"); }
       if (!ab || !ab.model) { res.writeHead(400); return res.end("missing model"); }
@@ -2013,10 +2062,10 @@ async function mainHandler(req, res) {
       };
       const key = ""; // l'hub usa le proprie key da auth.json; ignora la key placeholder del tool
       if (oai.stream) {
-        return streamWithFailover(oai, res, "anthropic");
+        return streamWithFailover(oai, res, "anthropic", req);
       }
       try {
-        const r = await postWithFailover(oai, key);
+        const r = await postWithFailover(oai, key, req);
         if (!r.ok) { res.writeHead(502, { "Content-Type": "application/json" }); return res.end(JSON.stringify({ type: "error", error: { type: "upstream_error", message: r.error || "upstream failed" } })); }
         const content = (r.data && r.data.choices && r.data.choices[0] && r.data.choices[0].message && r.data.choices[0].message.content) || "";
         const usage = (r.data && r.data.usage) || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
@@ -2041,9 +2090,10 @@ async function mainHandler(req, res) {
     // OpenAI streaming
     let parsedChat = null;
     if (req.method === "POST" && url.includes("chat/completions")) {
+      if (checkDailyLimit(req, res)) return;
       let body = "";
       for await (const c of req) body += c;
-      _activeReq.__ctx = buildCtx(body);
+      req.__ctx = buildCtx(body);
       try { parsedChat = JSON.parse(body); } catch { res.writeHead(400); return res.end("bad json"); }
       if (!parsedChat || !parsedChat.model) { res.writeHead(400); return res.end("missing model"); }
     }
@@ -2051,7 +2101,7 @@ async function mainHandler(req, res) {
     if (parsedChat && parsedChat.stream === true) {
       const parsed = parsedChat;
       const profile = resolveProfile(req.__fixedProfile || parsed.model, parsed.messages);
-      const candidates = selectCandidates(parsed.model, profile);
+      const candidates = selectCandidates(parsed.model, profile, req);
       const chainStart = Date.now();
       const CHAIN_BUDGET = settingsCfg().failoverMs;
       let clientStarted = false;
@@ -2227,7 +2277,7 @@ async function mainHandler(req, res) {
 
     // OpenAI non-streaming
     if (req.method === "POST" && url.includes("chat/completions") && parsedChat) {
-      const r = await postWithFailover(parsedChat, keyIdFor(req));
+      const r = await postWithFailover(parsedChat, keyIdFor(req), req);
       if (r.ok) {
         res.setHeader("Content-Type", "application/json");
         if (r.data && r.data.model) { try { res.setHeader("x-modelhub-model", String(r.data.model)); } catch {} }
@@ -2245,7 +2295,7 @@ async function mainHandler(req, res) {
       const parsed = await readBody(req);
       if (!parsed || !parsed.model) { res.writeHead(400); return res.end("missing model"); }
       const profile = resolveProfile(req.__fixedProfile || parsed.model, parsed.messages);
-      const candidates = selectCandidates(parsed.model, profile).slice(0, 3);
+      const candidates = selectCandidates(parsed.model, profile, req).slice(0, 3);
       for (const id of candidates) {
         const m = modelMap.get(id);
         if (!m || !m.enabled) continue;
@@ -2266,10 +2316,10 @@ async function mainHandler(req, res) {
       const body = await readBody(req);
       if (body.stream === true) {
         const oai = anthropicToOpenAI(body);
-        return streamWithFailover(oai, res, "anthropic");
+        return streamWithFailover(oai, res, "anthropic", req);
       }
       const oai = anthropicToOpenAI(body);
-      const r = await postWithFailover(oai);
+      const r = await postWithFailover(oai, undefined, req);
       if (r.ok) {
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify(openAIToAnthropic(r.data, body.model)));
@@ -2288,9 +2338,9 @@ async function mainHandler(req, res) {
       try { parsed = JSON.parse(body || "{}"); } catch { parsed = {}; }
       const streaming = parsed.stream === true;
       if (streaming) {
-        return streamWithFailover(parsed, res, "gemini");
+        return streamWithFailover(parsed, res, "gemini", req);
       }
-      const r = await postWithFailover(parsed);
+      const r = await postWithFailover(parsed, undefined, req);
       if (r.ok) {
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify(r.data));
@@ -2308,9 +2358,9 @@ async function mainHandler(req, res) {
       const oai = geminiGenerateToOpenAI(gm[1], body);
       const streaming = body.generationConfig && body.generationConfig.stream === true;
       if (streaming) {
-        return streamWithFailover(oai, res, "gemini");
+        return streamWithFailover(oai, res, "gemini", req);
       }
-      const r = await postWithFailover(oai);
+      const r = await postWithFailover(oai, undefined, req);
       if (r.ok) {
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify(openAIToGemini(r.data)));
@@ -2326,9 +2376,9 @@ async function mainHandler(req, res) {
       const body = await readBody(req);
       const oai = ollamaChatToOpenAI(body);
       if (body.stream === true) {
-        return streamWithFailover(oai, res, "ollama");
+        return streamWithFailover(oai, res, "ollama", req);
       }
-      const r = await postWithFailover(oai);
+      const r = await postWithFailover(oai, undefined, req);
       if (r.ok) {
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify(openAIToOllama(r.data, body.model)));
@@ -2355,6 +2405,8 @@ async function mainHandler(req, res) {
     log("handler error: " + e.message);
     if (!res.headersSent) { res.writeHead(500); }
     res.end(JSON.stringify({ error: e.message }));
+  } finally {
+    activeRequests.delete(reqKey);
   }
 }
 
@@ -2394,7 +2446,7 @@ async function cliTest(modelId, prompt) {
     max_tokens: 100,
     stream: false
   };
-  const r = await postWithFailover(openaiBody);
+  const r = await postWithFailover(openaiBody, undefined, null);
   if (r.ok) {
     console.log(JSON.stringify(r.data, null, 2));
   } else {
@@ -2477,12 +2529,8 @@ async function verifyHeads() {
         if (m && m.enabled && isChatModel(id) && !ids.includes(id)) ids.push(id);
       }
     }
-    // Aggiunge TUTTI i modelli abilitati (free e paid) così i test di verifica
-    // scoprono nuovi modelli free anche fuori dai profili. I paid verranno
-    // scartati da prunePaidModels() dopo i test.
-    for (const m of models) {
-      if (m.enabled && isChatModel(m.id) && !ids.includes(m.id)) ids.push(m.id);
-    }
+    // Solo i modelli top-K per profilo: rimuove il loop su tutti i modelli
+    // per evitare 1300+ request ogni 15min.
     const pool = Math.max(2, PROV_CONCURRENCY);
     let i = 0;
     await Promise.all(Array.from({ length: pool }, async () => {
@@ -2499,15 +2547,15 @@ async function verifyHeads() {
 }
 function startProfileRefresher() {
   setTimeout(() => { if (process.env.MODELHUB_VERIFY !== "0") verifyHeads(); }, 90000);
-  const tick = () => {
+  let refreshing = false;
+  profileRefreshInterval = setInterval(() => {
+    if (refreshing) return;
+    refreshing = true;
     rebuildProfiles();
-    if (process.env.MODELHUB_VERIFY !== "0") verifyHeads().then(() => prunePaidModels());
-    else prunePaidModels();
-    setTimeout(tick, Math.max(30000, settingsCfg().verifyMs));
-  };
-  setTimeout(tick, Math.max(30000, settingsCfg().verifyMs));
+    if (process.env.MODELHUB_VERIFY !== "0") verifyHeads().then(() => prunePaidModels()).catch(() => prunePaidModels()).finally(() => { refreshing = false; });
+    else { prunePaidModels(); refreshing = false; }
+  }, Math.max(30000, settingsCfg().verifyMs));
 }
-
 // ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
@@ -2547,7 +2595,7 @@ async function main() {
 
 function startBackgroundProber() {
   let backgroundProbing = false;
-  setInterval(() => {
+  bgProberInterval = setInterval(() => {
     const now = Date.now();
     for (const m of models) {
       if (m.failUntil && m.failUntil <= now) { m.failUntil = 0; }
@@ -2562,6 +2610,12 @@ function startBackgroundProber() {
       try { await probeOne(m); } finally { m.halfOpen = false; }
     })).then(() => { backgroundProbing = false; });
   }, 60000);
+}
+
+
+function cleanup() {
+  clearInterval(bgProberInterval);
+  clearInterval(profileRefreshInterval);
 }
 
 function startHub() {
@@ -2622,7 +2676,7 @@ module.exports = {
   ollamaChatToOpenAI, openAIToOllama,
   encryptAuth, decryptAuth, looksLikeAuth,
   priceFor, computeCost, effectivePrice, cascadeValid, deriveEndpoint,
-  strategyFor, applyStrategy, selectCandidates, postWithFailover, controlAuthorized, gatewayAuthorized, startHub,
+  strategyFor, applyStrategy, selectCandidates, postWithFailover, controlAuthorized, gatewayAuthorized, startHub, cleanup,
   genKey, mintKey, rateLimited,
   __setState(state = {}) {
     if (Array.isArray(state.models)) { models = state.models; modelMap = new Map(state.models.map(m => [m.id, m])); }
